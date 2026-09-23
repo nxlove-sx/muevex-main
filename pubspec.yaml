@@ -1,0 +1,68 @@
+name: muevex
+description: Plataforma de transporte de muebles y cargas pequeñas mediante motocarros
+publish_to: 'none'
+version: 1.0.0+2002
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management - Riverpod 2.x
+  riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+  flutter_riverpod: ^2.5.1
+
+  # Navigation
+  go_router: ^7.0.0
+
+  # API & Backend
+  supabase_flutter: ^2.17.2
+
+  # Image handling
+  image_picker: ^1.0.0
+  cached_network_image: ^4.0.0
+
+  # Local storage
+  shared_preferences: ^2.0.0
+  flutter_secure_storage: ^11.0.0
+
+  # Utility
+  intl: ^0.20.3
+  uuid: ^4.0.0
+
+  # Firebase
+  firebase_messaging: ^16.6.0
+  equatable: ^2.1.0
+
+  # Mapas
+  flutter_map: ^6.2.1
+  latlong2: ^0.9.1
+  geolocator: ^14.0.3
+
+  # HTTP para el servicio de geocoding/autocompletado (Photon - sin API key)
+  http: ^1.2.0
+
+  # Iconos del sistema (usa-material-design)
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  build_runner: ^2.4.0
+  riverpod_generator: ^2.6.3
+  go_router_builder: ^2.4.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/muevex_logo.png
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Roboto-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700
