@@ -58,3 +58,40 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# ── Secretos: nunca versionados ────────────────────────────────────────────
+# Though de firma de Android. Sin esto, un `flutter build apk --release` en
+# otra máquina genera el keystore y basta un `git add .` para subirlo.
+/android/key.properties
+**/key.properties
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+*.cer
+*.der
+
+# Config de Firebase / Google. Contiene claves de proyecto.
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_options.dart
+
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# Credenciales de Supabase u otros servicios
+**/*service_role*
+**/supabase_service_key*
+
+# ── Ruido de herramientas ──────────────────────────────────────────────────
+# Config local de Flutter en otras plataformas (se regenera solo).
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+macos/Flutter/ephemeral/
+ios/Flutter/ephemeral/
+**/ios/Runner.xcodeproj/xcuserdata/
+**/ios/Runner.xcworkspace/xcuserdata/
+.vscode/
+*.iml

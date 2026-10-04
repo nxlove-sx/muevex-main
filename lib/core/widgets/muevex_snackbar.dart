@@ -14,7 +14,8 @@ void showMuevexSnackBar(
 }) {
   final messenger = ScaffoldMessenger.of(context);
   messenger.hideCurrentSnackBar();
-  final accentColor = isError ? MuevexTheme.errorColor : MuevexTheme.successColor;
+  final accentColor =
+      isError ? MuevexTheme.errorColor : MuevexTheme.successColor;
   messenger.showSnackBar(
     SnackBar(
       content: Row(

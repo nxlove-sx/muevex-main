@@ -100,7 +100,9 @@ class MuevexErrorView extends StatelessWidget {
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13.5, color: MuevexTheme.secondaryTextOf(context)),
+                style: TextStyle(
+                    fontSize: 13.5,
+                    color: MuevexTheme.secondaryTextOf(context)),
               ),
               if (onRetry != null) ...[
                 const SizedBox(height: 20),
@@ -201,7 +203,8 @@ class MuevexEmptyView extends StatelessWidget {
             Text(
               subtitle!,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: MuevexTheme.secondaryTextOf(context)),
+              style: TextStyle(
+                  fontSize: 13, color: MuevexTheme.secondaryTextOf(context)),
             ),
           ],
           if (actionLabel != null && onAction != null) ...[

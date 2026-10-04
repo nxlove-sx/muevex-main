@@ -37,9 +37,7 @@ class LocationResult {
     final parts = <String>[
       if (street != null && street!.trim().isNotEmpty) street!.trim(),
       if (cityPart != null && cityPart.isNotEmpty) cityPart,
-      if (statePart != null &&
-          statePart.isNotEmpty &&
-          statePart != cityPart)
+      if (statePart != null && statePart.isNotEmpty && statePart != cityPart)
         statePart,
     ];
     final countryPart = country?.trim();
@@ -83,6 +81,84 @@ class LocationResult {
       osmType: _asString(props['osm_type']) ?? '',
       osmId: _asString(props['osm_id']) ?? '',
     );
+  }
+
+  /// Convierte un candidato de `findAddressCandidates` (Esri) en un
+  /// [LocationResult], o `null` si el candidato no sirve como destino.
+  ///
+  /// La dirección de Esri llega como texto plano, separada por comas:
+  /// "Calle 10 30 20, Las Lomas No.1, Medellín, Antioquia". El primer
+  /// fragmento es la calle con número (lo que va en la etiqueta del pin), los
+  /// últimos son ciudad y departamento.
+  ///
+  /// Se descarta lo que no es un sitio concreto:
+  ///  - score bajo: ESRI devuelve "Carrera" (82) o "Centro Comercial Carrera"
+  ///    (81) en otra ciudad cuando la búsqueda está a medio escribir, mientras
+  ///    que una dirección real baja 93-100.
+  ///  - [Addr_type](https://developers.arcgis.com/rest/services/geocode/GeocodeService/overview.htm)
+  ///    `Country` o `State`: "Colombia" no es un destino.
+  static LocationResult? fromEsri(
+    Map<String, dynamic> candidate, {
+    double minScore = 90,
+  }) {
+    final score = (candidate['score'] as num?)?.toDouble() ?? 0;
+    if (score < minScore) return null;
+
+    final attrs = (candidate['attributes'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final addrType = (_asString(attrs['Addr_type']) ?? '').toLowerCase();
+    if (addrType == 'country' || addrType == 'state') return null;
+
+    final location = candidate['location'] as Map?;
+    final lon = (location?['x'] as num?)?.toDouble();
+    final lat = (location?['y'] as num?)?.toDouble();
+    if (lat == null || lon == null) return null;
+    if (lat == 0 && lon == 0) return null;
+
+    final match = _firstNonEmpty([
+      _asString(attrs['Match_addr']),
+      _asString(candidate['address']),
+    ]);
+    if (match == null) return null;
+
+    var parts = match
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (parts.length > 1 && parts.last.toLowerCase() == 'colombia') {
+      parts.removeLast();
+    }
+    if (parts.isEmpty) return null;
+
+    // "Calle 10, Medellín, Antioquia" (3 partes) es un punto de interés con
+    // ciudad; "Calle 10 # 30-20, Las Lomas, Medellín, Antioquia" (4+) sí trae
+    // calle, así que solo ahí se usa la calle como subtítulo (si no, el
+    // subtítulo repetiría el nombre tal cual).
+    final isStreetAddress = parts.length >= 4;
+    return LocationResult(
+      name: parts.first,
+      street: isStreetAddress ? parts.first : null,
+      city: _firstNonEmpty([
+        _asString(attrs['City']),
+        if (parts.length >= 3) parts[parts.length - 2],
+      ]),
+      state: _firstNonEmpty([
+        _asString(attrs['Region']),
+        if (parts.length >= 2) parts.last,
+      ]),
+      postcode: _asString(attrs['Postal']),
+      coordinates: LatLng(lat, lon),
+    );
+  }
+
+  /// Primer texto no vacío de [values].
+  static String? _firstNonEmpty(List<String?> values) {
+    for (final v in values) {
+      final trimmed = v?.trim();
+      if (trimmed != null && trimmed.isNotEmpty) return trimmed;
+    }
+    return null;
   }
 
   /// Normaliza un valor de Photon a texto, tolerando `num` y otros tipos.

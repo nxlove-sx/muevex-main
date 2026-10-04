@@ -45,8 +45,7 @@ class MapSearchState {
     this.selected,
   });
 
-  const MapSearchState.initial()
-      : this(status: MapSearchStatus.idle);
+  const MapSearchState.initial() : this(status: MapSearchStatus.idle);
 
   MapSearchState copyWith({
     MapSearchStatus? status,
@@ -70,7 +69,9 @@ class MapSearchState {
 ///  - Debounce de ~400 ms mientras se escribe.
 ///  - Número de generación para descartar respuestas que ya no corresponden
 ///    al texto actual.
-///  - El contexto (proximidad + viewbox) se actualiza mientras el mapa cambia.
+///  - La proximidad (ubicación del usuario o centro del mapa) se actualiza
+///    mientras el mapa cambia: ordena los resultados, no los recorta (con el
+///    recorte por área visible no se podían buscar destinos fuera de pantalla).
 class MapSearchNotifier extends StateNotifier<MapSearchState> {
   final GeocodingService _service;
 
@@ -123,11 +124,7 @@ class MapSearchNotifier extends StateNotifier<MapSearchState> {
   Future<void> _search(String query) async {
     final generation = ++_requestGeneration;
     try {
-      final results = await _service.search(
-        query,
-        proximity: _proximity,
-        bounds: _bounds,
-      );
+      final results = await _service.search(query, proximity: _proximity);
       if (!mounted || generation != _requestGeneration) return;
       state = MapSearchState(
         status: results.isEmpty

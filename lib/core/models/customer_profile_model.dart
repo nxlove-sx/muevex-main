@@ -81,14 +81,14 @@ class CustomerProfile extends Equatable {
 
   @override
   List<Object?> get props => [
-    id,
-    userId,
-    phone,
-    profilePhotoUrl,
-    address,
-    rating,
-    totalServices,
-    createdAt,
-    updatedAt,
-  ];
+        id,
+        userId,
+        phone,
+        profilePhotoUrl,
+        address,
+        rating,
+        totalServices,
+        createdAt,
+        updatedAt,
+      ];
 }

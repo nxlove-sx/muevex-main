@@ -64,12 +64,12 @@ class Rating extends Equatable {
 
   @override
   List<Object?> get props => [
-    id,
-    serviceId,
-    raterId,
-    ratedId,
-    score,
-    comment,
-    createdAt,
-  ];
+        id,
+        serviceId,
+        raterId,
+        ratedId,
+        score,
+        comment,
+        createdAt,
+      ];
 }

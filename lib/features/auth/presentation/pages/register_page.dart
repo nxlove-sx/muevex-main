@@ -43,9 +43,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    final result = await ref
-        .read(authProvider.notifier)
-        .register(
+    final result = await ref.read(authProvider.notifier).register(
           emailController.text.trim(),
           passwordController.text,
           nameController.text.trim(),

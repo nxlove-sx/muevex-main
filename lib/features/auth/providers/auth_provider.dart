@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,17 +7,25 @@ import 'package:muevex/core/models/user_model.dart' as muevex_user;
 import 'package:muevex/core/supabase/supabase_client.dart';
 
 /// Auth provider - manejo de estado de autenticación
-final authProvider = StateNotifierProvider<AuthNotifier, AsyncValue<muevex_user.User?>>((ref) {
-  return AuthNotifier();
+final authProvider =
+    StateNotifierProvider<AuthNotifier, AsyncValue<muevex_user.User?>>((ref) {
+  // La suscripción a `supabase.auth` se abre aquí y no en el constructor del
+  // notifier: así `AuthNotifier` se puede construir en un test sin cliente de
+  // Supabase inicializado (desde el constructor lanzaba
+  // `LateInitializationError`).
+  final notifier = AuthNotifier();
+  ref.onDispose(notifier.dispose);
+  notifier.listenToAuthChanges();
+  return notifier;
 });
 
 class AuthNotifier extends StateNotifier<AsyncValue<muevex_user.User?>> {
-  AuthNotifier() : super(const AsyncValue.data(null)) {
-    _listenToAuthChanges();
-  }
+  AuthNotifier() : super(const AsyncValue.data(null));
 
-  void _listenToAuthChanges() {
-    supabase.auth.onAuthStateChange.listen((event) async {
+  StreamSubscription<void>? _authSub;
+
+  void listenToAuthChanges() {
+    _authSub ??= supabase.auth.onAuthStateChange.listen((event) async {
       final session = event.session;
       if (session != null) {
         try {
@@ -28,6 +38,12 @@ class AuthNotifier extends StateNotifier<AsyncValue<muevex_user.User?>> {
         state = const AsyncValue.data(null);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
   }
 
   Future<muevex_user.User> _getUserProfile(String userId) async {
@@ -58,9 +74,8 @@ class AuthNotifier extends StateNotifier<AsyncValue<muevex_user.User?>> {
   }
 
   /// Registro con email y contraseña
-  Future<AuthRegisterResult> register(
-      String email, String password, String name,
-      muevex_user.UserRole role) async {
+  Future<AuthRegisterResult> register(String email, String password,
+      String name, muevex_user.UserRole role) async {
     try {
       state = const AsyncValue.loading();
       final authRes = await supabase.auth.signUp(

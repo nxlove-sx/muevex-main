@@ -1,47 +1,26 @@
 import 'package:flutter/material.dart';
 
-import 'package:muevex/core/services/price_calculator.dart';
+import 'package:muevex/core/services/tariff_engine.dart';
 import 'package:muevex/core/themes/muevex_theme.dart';
 import 'package:muevex/core/utils/money.dart';
 
-const Map<String, String> _serviceTypeLabels = {
-  'muebles': 'Muebles',
-  'electrodomesticos': 'Electrodomésticos',
-  'cajas': 'Cajas',
-  'piso': 'Mudanza de piso',
-};
-
-const Map<String, String> _hourPeriodLabels = {
-  'early_morning': 'Madrugada (6–9 AM)',
-  'morning': 'Mañana (9 AM–12 PM)',
-  'afternoon': 'Tarde (12–6 PM)',
-  'evening': 'Noche (6–9 PM)',
-  'night': 'Madrugada (9 PM–6 AM)',
-};
-
-/// Muestra el desglose itemizado del precio estimado, para que el usuario
-/// entienda de qué se compone la tarifa (transparencia de precios).
+/// Muestra el desglose itemizado del precio estimado.
+///
+/// Acepta la **[Tarifa] ya calculada**, no una `TarifaEntrada`, a propósito.
+///
+/// Cada pantalla calculaba su tarifa dos veces: una para el precio que muestra
+/// y otra para el desglose, reconstruyendo la entrada a mano. Las dos entradas
+/// no tienen por qué coincidir: la del desglose usaba solo los artículos del
+/// formulario, sin el respaldo al tipo de carga que sí hace el precio. Con la
+/// carga inicial (artículos vacíos) eso hacía que un servicio de muebles se
+/// cotizara en $55.000 y el desglose dijera $25.000.
+///
+/// Pasando la tarifa ya calculada no hay dos verdades: quien pinta el desglose
+/// pinta exactamente lo mismo que pinta el precio.
 Future<void> showPriceBreakdownSheet(
   BuildContext context, {
-  required double distanceKm,
-  required String serviceType,
-  required bool needsHelp,
-  required int floors,
-  String? hourPeriod,
-}) {
-  final typeMultiplier = PriceCalculator
-          .serviceTypeMultipliers[serviceType] ??
-      1.0;
-  final distanceCost = distanceKm * PriceCalculator.pricePerKm;
-  final floorsCost = floors * PriceCalculator.floorsFeePerFloor;
-  final total = PriceCalculator.calculateRecommendedPrice(
-    distanceKm: distanceKm,
-    serviceType: serviceType,
-    needsHelp: needsHelp,
-    floors: floors,
-    hourPeriod: hourPeriod,
-  );
-
+  required Tarifa tarifa,
+}) async {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -49,8 +28,7 @@ Future<void> showPriceBreakdownSheet(
     builder: (sheetContext) => Container(
       decoration: BoxDecoration(
         color: MuevexTheme.surfaceOf(sheetContext),
-        borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
           bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
@@ -85,43 +63,26 @@ Future<void> showPriceBreakdownSheet(
               style: TextStyle(fontSize: 13, color: Colors.grey),
             ),
             const SizedBox(height: 18),
-            _BreakdownRow(
-              label: 'Tarifa base',
-              amount: money(PriceCalculator.baseFare),
-            ),
-            _BreakdownRow(
-              label: 'Distancia (${distanceKm.toStringAsFixed(1)} km × '
-                  '\$2.000)',
-              amount: money(distanceCost),
-            ),
-            _BreakdownRow(
-              label: 'Tipo de carga · '
-                  '${_serviceTypeLabels[serviceType] ?? 'Carga'}',
-              amount: '×${typeMultiplier.toStringAsFixed(2).replaceFirst(RegExp(r'\.?0+$'), '')}',
-            ),
-            if (needsHelp)
-              _BreakdownRow(
-                label: 'Ayuda de carga',
-                amount: money(PriceCalculator.helpLoadFee),
-              ),
-            if (floors > 0)
-              _BreakdownRow(
-                label: '$floors piso${floors > 1 ? 's' : ''} (× '
-                    '\$2.000)',
-                amount: money(floorsCost),
-              ),
-            if (hourPeriod != null &&
-                PriceCalculator.hourMultipliers.containsKey(hourPeriod))
-              _BreakdownRow(
-                label: 'Factor horario · '
-                    '${_hourPeriodLabels[hourPeriod] ?? hourPeriod}',
-                amount:
-                    '×${PriceCalculator.hourMultipliers[hourPeriod]!.toStringAsFixed(1)}',
-              ),
+            ...tarifa.lineas.map((linea) => _BreakdownRow(
+                  label: linea.concepto,
+                  amount: money(linea.monto),
+                  detalle: linea.detalle,
+                )),
             const Divider(height: 28),
+            // Los precios de la tabla TRANSPERSQUI son NETOS. Se lo decimos al
+            // cliente antes de que lo descubra en la factura: el total que va
+            // a pagar lleva el IVA encima. Ver migracion_facturacion_v4.sql.
             _BreakdownRow(
-              label: 'Total estimado',
-              amount: money(total),
+              label: 'Subtotal (sin IVA)',
+              amount: money(tarifa.total),
+            ),
+            _BreakdownRow(
+              label: 'IVA (19%)',
+              amount: money(tarifa.total * ivaRate),
+            ),
+            _BreakdownRow(
+              label: 'Total a pagar',
+              amount: moneyConIva(tarifa.total),
               isTotal: true,
             ),
             const SizedBox(height: 16),
@@ -140,8 +101,9 @@ Future<void> showPriceBreakdownSheet(
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Precio estimado. El conductor confirma el valor '
-                      'final antes de iniciar el viaje.',
+                      'Precio estimado según tabla TRANSPERSQUI. El IVA se suma '
+                      'encima del subtotal, por eso el total es mayor. El conductor '
+                      'confirma el valor final antes de iniciar el viaje.',
                       style: TextStyle(fontSize: 12, color: Color(0xFF334155)),
                     ),
                   ),
@@ -155,14 +117,54 @@ Future<void> showPriceBreakdownSheet(
   );
 }
 
+/// Helper para crear la entrada desde el formulario legacy (compatibilidad).
+///
+/// Útil mientras se migra la UI al selector de artículos.
+TarifaEntrada entradaDesdeFormularioLegacy({
+  required double distanceKm,
+  required String serviceType,
+  required bool needsHelp,
+  required int floors,
+  String? hourPeriod,
+}) {
+  final articulos = _articulosPorTipoCargaLegacy(serviceType);
+  return TarifaEntrada(
+    distanciaKm: distanceKm,
+    articulos: articulos,
+    pisosRecogida: 0,
+    pisosEntrega: floors,
+    ayudante: needsHelp ? OrigenAyudante.plataforma : OrigenAyudante.incluido,
+    viajes: 1,
+  );
+}
+
+List<ArticuloSeleccionado> _articulosPorTipoCargaLegacy(String? loadType) {
+  switch (loadType) {
+    case 'muebles':
+      return [ArticuloSeleccionado(TarifaEngine.articuloPorId('sofa_3')!)];
+    case 'electrodomesticos':
+      return [ArticuloSeleccionado(TarifaEngine.articuloPorId('lavadora')!)];
+    case 'piso':
+      return [
+        ArticuloSeleccionado(TarifaEngine.articuloPorId('colchon_doble')!),
+        ArticuloSeleccionado(TarifaEngine.articuloPorId('closet_desarmado')!),
+      ];
+    case 'cajas':
+    default:
+      return const [];
+  }
+}
+
 class _BreakdownRow extends StatelessWidget {
   final String label;
   final String amount;
+  final String? detalle;
   final bool isTotal;
 
   const _BreakdownRow({
     required this.label,
     required this.amount,
+    this.detalle,
     this.isTotal = false,
   });
 
@@ -173,9 +175,8 @@ class _BreakdownRow extends StatelessWidget {
       fontWeight: isTotal ? FontWeight.w800 : FontWeight.w500,
       color: isTotal ? const Color(0xFF111827) : Colors.grey.shade700,
     );
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
+    final children = <Widget>[
+      Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Expanded(
@@ -192,6 +193,22 @@ class _BreakdownRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    ];
+    if (detalle != null && detalle!.isNotEmpty) {
+      children.addAll([
+        const SizedBox(height: 2),
+        Text(
+          detalle!,
+          style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+        ),
+      ]);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
       ),
     );
   }

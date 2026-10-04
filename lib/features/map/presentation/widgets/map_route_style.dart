@@ -68,8 +68,7 @@ List<Marker> routeFlowMarkers(
   final cumulative = <double>[0];
   for (var i = 1; i < points.length; i++) {
     cumulative.add(
-      cumulative.last +
-          dist.as(LengthUnit.Meter, points[i - 1], points[i]),
+      cumulative.last + dist.as(LengthUnit.Meter, points[i - 1], points[i]),
     );
   }
   final total = cumulative.last;

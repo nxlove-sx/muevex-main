@@ -10,7 +10,6 @@ import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import 'package:muevex/core/utils/money.dart';
 import 'package:muevex/core/models/service_model.dart';
-import 'package:muevex/core/models/rating_model.dart';
 import 'package:muevex/core/models/payment_model.dart';
 import 'package:muevex/core/supabase/supabase_client.dart' as api;
 import 'package:muevex/core/themes/muevex_theme.dart';
@@ -162,8 +161,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (target == null || _routeLoading) return;
     final sinceLast = DateTime.now().difference(_lastRouteAt);
     if (_lastRouteFrom != null &&
-        const Distance().distance(_lastRouteFrom!, from) <
-            _routeRecalcMeters &&
+        const Distance().distance(_lastRouteFrom!, from) < _routeRecalcMeters &&
         sinceLast < _routeRecalcInterval) {
       return;
     }
@@ -220,6 +218,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           callback: (payload) async {
             final row = payload.newRecord;
             final newDriver = row['driver_id'] as String?;
+            final newStatus = row['status'] as String?;
+            debugPrint(
+                'MUEVEX realtime services: status=$newStatus driver_id=$newDriver');
             if (!mounted) return;
             setState(() {
               _service = Service.fromMap(Map<String, dynamic>.from(row));
@@ -273,6 +274,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (!mounted) return;
     final loc = LatLng((lat as num).toDouble(), (lng as num).toDouble());
     final heading = (payload['heading'] as num?)?.toDouble() ?? 0;
+    debugPrint('MUEVEX realtime driver_locations: $loc heading=$heading');
     setState(() {
       _driverLocation = loc;
       _driverHeading = heading;
@@ -294,12 +296,12 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final origin = LatLng(service.originLat, service.originLng);
-      final destination = LatLng(service.destinationLat, service.destinationLng);
+      final destination =
+          LatLng(service.destinationLat, service.destinationLng);
       final bounds = LatLngBounds.fromPoints([origin, destination]);
       // Margen inferior amplio para que la ruta no quede detrás del panel.
       _mapController.fitCamera(CameraFit.bounds(
-          bounds: bounds,
-          padding: const EdgeInsets.fromLTRB(60, 60, 60, 190)));
+          bounds: bounds, padding: const EdgeInsets.fromLTRB(60, 60, 60, 190)));
     });
   }
 
@@ -377,31 +379,40 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         await api.createPayment(Payment(
           id: '',
           serviceId: service.id,
-          amount: service.finalPrice ?? service.priceTotal,
+          amount: precioTotalConIva(service.finalPrice ?? service.priceTotal),
           paymentMethod: 'efectivo',
           status: 'completed',
           paidAt: DateTime.now(),
           createdAt: DateTime.now(),
         ));
       }
-      // Calificación del conductor
-      await api.createRating(Rating(
-        id: '',
+      // Calificación del conductor.
+      // Antes se ignoraba el resultado y se decía "¡Gracias!" pase lo que
+      // pase: si ya estaba calificado o si hubo un 403, la app confirmaba algo
+      // que no ocurrió y el usuario creía que había dejado su nota.
+      final nota = await api.submitClientRating(
         serviceId: service.id,
-        raterId: me,
-        ratedId: driverId,
+        driverId: driverId,
         score: result.score.toDouble(),
         comment: result.comment,
-        createdAt: DateTime.now(),
-      ));
-      if (!mounted) return;
-      setState(() => _rated = true);
-      ref.invalidate(customerServicesProvider);
-      showMuevexSnackBar(
-        context,
-        message: '¡Gracias por calificar al conductor!',
-        icon: Icons.star,
       );
+      if (!mounted) return;
+      if (nota.ok) {
+        setState(() => _rated = true);
+        ref.invalidate(customerServicesProvider);
+        showMuevexSnackBar(
+          context,
+          message: '¡Gracias por calificar al conductor!',
+          icon: Icons.star,
+        );
+      } else {
+        showMuevexSnackBar(
+          context,
+          message: nota.error ?? 'No se pudo guardar tu calificación.',
+          icon: Icons.error_outline,
+          isError: true,
+        );
+      }
     } catch (e) {
       if (mounted) {
         showMuevexSnackBar(
@@ -457,7 +468,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       Marker(
         point: origin,
         width: 44,
-        height: 80,
+        height: 96,
         alignment: Alignment.bottomCenter,
         child: const MapPin(
           icon: Icons.trip_origin_rounded,
@@ -472,10 +483,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       Marker(
         point: destination,
         width: 44,
-        height: 80,
+        height: 96,
         alignment: Alignment.bottomCenter,
         child: BouncingMarker(
           amplitude: 6,
+          alignment: Alignment.bottomCenter,
           child: const MapPin(
             icon: Icons.flag_rounded,
             label: 'DESTINO',
@@ -500,9 +512,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 child: Transform.rotate(
                   // El icono apunta al este; resto 90° para que el ángulo
                   // coincida con el rumbo real del conductor (heading 0 = norte).
-                  angle: (_driverHeading > 0
-                          ? _driverHeading - 90
-                          : 0) *
+                  angle: (_driverHeading > 0 ? _driverHeading - 90 : 0) *
                       math.pi /
                       180,
                   child: Container(
@@ -514,8 +524,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                       border: Border.all(color: Colors.white, width: 3),
                       boxShadow: [
                         BoxShadow(
-                          color: MuevexTheme.primaryColor
-                              .withValues(alpha: 0.45),
+                          color:
+                              MuevexTheme.primaryColor.withValues(alpha: 0.45),
                           blurRadius: 14,
                           spreadRadius: 1,
                         ),
@@ -543,15 +553,11 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     // atenúa (contexto) y la restante brilla en gradiente con chevrones.
     final fullPlanned = _plannedRoute ?? _roadRoute;
     final remaining = _roadRoute;
-    final effectiveRoute =
-        (remaining ?? fullPlanned) ?? const <LatLng>[];
+    final effectiveRoute = (remaining ?? fullPlanned) ?? const <LatLng>[];
     final polylines = <Polyline>[
-      if (remaining != null &&
-          fullPlanned != null &&
-          fullPlanned.length > 1)
+      if (remaining != null && fullPlanned != null && fullPlanned.length > 1)
         ...buildRoutePolylines(fullPlanned, dim: true),
-      if (effectiveRoute.length > 1)
-        ...buildRoutePolylines(effectiveRoute),
+      if (effectiveRoute.length > 1) ...buildRoutePolylines(effectiveRoute),
     ];
     markers.addAll(_flowMarkersFor(effectiveRoute));
 
@@ -748,7 +754,8 @@ class _StatusPanel extends StatelessWidget {
         color: MuevexTheme.surfaceOf(context),
         borderRadius: BorderRadius.circular(20),
         boxShadow: const [
-          BoxShadow(color: Colors.black38, blurRadius: 16, offset: Offset(0, 4)),
+          BoxShadow(
+              color: Colors.black38, blurRadius: 16, offset: Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -796,8 +803,7 @@ class _StatusPanel extends StatelessWidget {
               status == ServiceStatus.solicitado) ...[
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 9),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               decoration: BoxDecoration(
                 color: MuevexTheme.warningColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(12),
@@ -872,7 +878,7 @@ class _StatusPanel extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Total: ${money(service.finalPrice ?? service.priceTotal)}',
+                      'Total: ${moneyConIva(service.finalPrice ?? service.priceTotal)}',
                       style: const TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 16,
@@ -932,14 +938,12 @@ class _DriverCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final useRoad = roadKm > 0 && roadMin > 0;
-    final eta = useRoad
-        ? roadMin.round()
-        : _estimateEta(distanceToDriver);
+    final eta = useRoad ? roadMin.round() : _estimateEta(distanceToDriver);
     final km = useRoad
         ? roadKm
         : (distanceToDriver != null
-            ? _haversine(distanceToDriver!,
-                LatLng(service.originLat, service.originLng))
+            ? _haversine(
+                distanceToDriver!, LatLng(service.originLat, service.originLng))
             : null);
 
     final vehicleLabel = <String>[
@@ -974,22 +978,22 @@ class _DriverCard extends StatelessWidget {
                   CircleAvatar(
                     radius: 26,
                     backgroundColor: MuevexTheme.primaryColor,
-                    child: driver.photoUrl != null &&
-                            driver.photoUrl!.isNotEmpty
-                        ? ClipOval(
-                            child: Image.network(
-                              driver.photoUrl!,
-                              width: 52,
-                              height: 52,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Icon(
-                                  Icons.person,
-                                  color: Colors.white,
-                                  size: 30),
-                            ),
-                          )
-                        : const Icon(Icons.person,
-                            color: Colors.white, size: 30),
+                    child:
+                        driver.photoUrl != null && driver.photoUrl!.isNotEmpty
+                            ? ClipOval(
+                                child: Image.network(
+                                  driver.photoUrl!,
+                                  width: 52,
+                                  height: 52,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const Icon(
+                                      Icons.person,
+                                      color: Colors.white,
+                                      size: 30),
+                                ),
+                              )
+                            : const Icon(Icons.person,
+                                color: Colors.white, size: 30),
                   ),
                   if (driver.isVerified)
                     Positioned(
@@ -1054,8 +1058,7 @@ class _DriverCard extends StatelessWidget {
                           return Icon(
                             filled ? Icons.star : Icons.star_border,
                             size: 15,
-                            color:
-                                filled ? Colors.amber : Colors.grey.shade400,
+                            color: filled ? Colors.amber : Colors.grey.shade400,
                           );
                         }),
                         const SizedBox(width: 4),
@@ -1089,8 +1092,7 @@ class _DriverCard extends StatelessWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(Icons.phone_outlined,
-                                    size: 14,
-                                    color: MuevexTheme.primaryColor),
+                                    size: 14, color: MuevexTheme.primaryColor),
                                 const SizedBox(width: 3),
                                 Text(
                                   driver.phone!,
@@ -1203,9 +1205,7 @@ class _DriverChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = accent
-        ? MuevexTheme.secondaryColor
-        : Colors.grey.shade700;
+    final color = accent ? MuevexTheme.secondaryColor : Colors.grey.shade700;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -1241,7 +1241,8 @@ class _RouteLine extends StatelessWidget {
   final Color color;
   final String text;
 
-  const _RouteLine({required this.icon, required this.color, required this.text});
+  const _RouteLine(
+      {required this.icon, required this.color, required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -1301,8 +1302,7 @@ class _RatingDialogState extends State<_RatingDialog> {
                   icon: Icon(
                     i < _score ? Icons.star : Icons.star_border,
                     size: 34,
-                    color:
-                        i < _score ? Colors.amber : Colors.grey.shade400,
+                    color: i < _score ? Colors.amber : Colors.grey.shade400,
                   ),
                 );
               }),

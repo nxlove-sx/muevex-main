@@ -77,14 +77,14 @@ class Load extends Equatable {
 
   @override
   List<Object?> get props => [
-    id,
-    serviceId,
-    description,
-    weightKg,
-    dimensions,
-    type,
-    needsHelp,
-    floors,
-    createdAt,
-  ];
+        id,
+        serviceId,
+        description,
+        weightKg,
+        dimensions,
+        type,
+        needsHelp,
+        floors,
+        createdAt,
+      ];
 }

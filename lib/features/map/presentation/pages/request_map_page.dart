@@ -10,7 +10,8 @@ import 'package:latlong2/latlong.dart';
 
 import 'package:muevex/core/utils/money.dart';
 import 'package:muevex/core/services/location_service.dart';
-import 'package:muevex/core/services/price_calculator.dart';
+import 'package:muevex/core/services/tariff_codec.dart';
+import 'package:muevex/core/services/tariff_engine.dart';
 import 'package:muevex/core/themes/muevex_theme.dart';
 import 'package:muevex/core/widgets/animations.dart';
 import 'package:muevex/core/widgets/muevex_snackbar.dart';
@@ -47,7 +48,7 @@ class RequestMapPage extends ConsumerStatefulWidget {
 }
 
 class _RequestMapPageState extends ConsumerState<RequestMapPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final MapController _mapController = MapController();
   final DraggableScrollableController _sheetController =
       DraggableScrollableController();
@@ -55,7 +56,25 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
   final FocusNode _searchFocus = FocusNode();
 
   StreamSubscription<Position>? _positionSub;
-  AnimationController? _cameraAnim;
+
+  /// Un **único** controlador para todas las animaciones de cámara.
+  ///
+  /// Antes se creaba uno nuevo por llamada a [_animateCameraTo] y se
+  /// destruía el anterior. Con `SingleTickerProviderStateMixin` eso está
+  /// prohibido: el mixin solo admite un ticker, y crear un segundo lanza
+  /// `FlutterError` ("multiple tickers were created with single
+  /// TickerProviderStateMixin"). Bastaba con pulsar "Mi ubicación" y luego
+  /// elegir un destino para provocarlo.
+  late final AnimationController _cameraAnim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  );
+
+  /// Tween de la cámara en curso. Se reasignan en cada [_animateCameraTo] y
+  /// los lee el listener que se registra una sola vez en [initState].
+  Animation<double>? _camLat;
+  Animation<double>? _camLng;
+  Animation<double>? _camZoom;
 
   LatLng? _userLocation;
   LatLng? _origin;
@@ -71,13 +90,29 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
   @override
   void initState() {
     super.initState();
+
+    // Un solo listener para toda la vida de la pantalla: los tweens se
+    // reasignan en cada _animateCameraTo, así que aquí no se toca la cámara.
+    _cameraAnim.addListener(_onCameraTick);
+
     WidgetsBinding.instance.addPostFrameCallback((_) => _initLocationFlow());
+  }
+
+  /// Aplica el estado actual de los tweens a la cámara.
+  void _onCameraTick() {
+    final lat = _camLat;
+    final lng = _camLng;
+    final zoom = _camZoom;
+    if (lat == null || lng == null || zoom == null) return;
+    _mapController.move(LatLng(lat.value, lng.value), zoom.value);
   }
 
   @override
   void dispose() {
     _positionSub?.cancel();
-    _cameraAnim?.dispose();
+    _cameraAnim
+      ..removeListener(_onCameraTick)
+      ..dispose();
     _sheetController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
@@ -94,7 +129,8 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
   /// está bloqueado o el GPS apagado, lo indica para resolverlo.
   Future<void> _initLocationFlow() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
-      _showSnack('Activa el GPS de tu teléfono para usar tu ubicación como origen.');
+      _showSnack(
+          'Activa el GPS de tu teléfono para usar tu ubicación como origen.');
       return;
     }
 
@@ -105,7 +141,8 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
     if (!mounted) return;
 
     if (permission == LocationPermission.denied) {
-      _showSnack('Permiso de ubicación denegado. Puedes indicar tu origen con el buscador.');
+      _showSnack(
+          'Permiso de ubicación denegado. Puedes indicar tu origen con el buscador.');
       return;
     }
     if (permission == LocationPermission.deniedForever ||
@@ -122,8 +159,8 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
 
   /// Aplica la posición actual como origen (y clima del mapa) al obtenerla.
   Future<void> _fetchAndApplyLocation({Position? given}) async {
-    final position =
-        given ?? await LocationService.getCurrentPosition(requestIfNeeded: false);
+    final position = given ??
+        await LocationService.getCurrentPosition(requestIfNeeded: false);
     if (!mounted || position == null) return;
 
     debugPrint('MUEVEX location applied lat=${position.latitude} '
@@ -136,7 +173,9 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
       _originName = 'Mi ubicación';
     });
     _writeOriginToForm(point);
-    ref.read(mapSearchProvider.notifier).updateContext(proximity: _userLocation);
+    ref
+        .read(mapSearchProvider.notifier)
+        .updateContext(proximity: _userLocation);
     _animateCameraTo(point, zoom: 15);
     _startLiveTracking();
     _maybeRequestRoute();
@@ -167,7 +206,8 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
     }
 
     if (!await Geolocator.isLocationServiceEnabled()) {
-      _showSnack('Activa el GPS de tu teléfono para usar tu ubicación como origen.');
+      _showSnack(
+          'Activa el GPS de tu teléfono para usar tu ubicación como origen.');
     } else {
       final permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.deniedForever) {
@@ -283,27 +323,26 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
 
   /// Mueve la cámara suavemente (no brusco) hacia [target].
   void _animateCameraTo(LatLng target, {double zoom = 16}) {
-    _cameraAnim?.dispose();
     final start = _mapController.camera;
-    final animation = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    );
-    _cameraAnim = animation;
-    final lat = Tween<double>(
-        begin: start.center.latitude, end: target.latitude);
-    final lng = Tween<double>(
-        begin: start.center.longitude, end: target.longitude);
-    final zoomTween = Tween<double>(begin: start.zoom, end: zoom);
     final curved = CurvedAnimation(
-        parent: animation, curve: Curves.easeInOutCubic);
-    animation.addListener(() {
-      _mapController.move(
-        LatLng(lat.evaluate(curved), lng.evaluate(curved)),
-        zoomTween.evaluate(curved),
-      );
-    });
-    animation.forward();
+      parent: _cameraAnim,
+      curve: Curves.easeInOutCubic,
+    );
+    _camLat = Tween<double>(
+      begin: start.center.latitude,
+      end: target.latitude,
+    ).animate(curved);
+    _camLng = Tween<double>(
+      begin: start.center.longitude,
+      end: target.longitude,
+    ).animate(curved);
+    _camZoom = Tween<double>(begin: start.zoom, end: zoom).animate(curved);
+
+    // Si ya había una animación en curso se reinicia desde el punto actual,
+    // que es lo que espera el usuario al pulsar dos veces seguidas.
+    _cameraAnim
+      ..stop()
+      ..forward(from: 0);
   }
 
   /// Encuadra la cámara (con animación suave) para ver la ruta completa,
@@ -329,14 +368,12 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
 
   void _zoomIn() {
     final camera = _mapController.camera;
-    _mapController.move(
-        camera.center, (camera.zoom + 1).clamp(3, kMapMaxZoom));
+    _mapController.move(camera.center, (camera.zoom + 1).clamp(3, kMapMaxZoom));
   }
 
   void _zoomOut() {
     final camera = _mapController.camera;
-    _mapController.move(
-        camera.center, (camera.zoom - 1).clamp(3, kMapMaxZoom));
+    _mapController.move(camera.center, (camera.zoom - 1).clamp(3, kMapMaxZoom));
   }
 
   void _onMapMoved(MapPosition position, bool hasGesture) {
@@ -377,10 +414,10 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
 
   void _onContinue() {
     final form = ref.read(serviceFormProvider);
-    final hasOrigin = _origin != null ||
-        ((form['originLat'] as num?) ?? 0) != 0;
-    final hasDestination = _destination != null ||
-        ((form['destinationLat'] as num?) ?? 0) != 0;
+    final hasOrigin =
+        _origin != null || ((form['originLat'] as num?) ?? 0) != 0;
+    final hasDestination =
+        _destination != null || ((form['destinationLat'] as num?) ?? 0) != 0;
 
     if (!hasOrigin) {
       showMuevexSnackBar(
@@ -407,6 +444,35 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
     context.go('/service/create');
   }
 
+  /// Eligió un tipo de carga en el resumen.
+  ///
+  /// Antes el selector solo cambiaba un `_selectedLoadType` local, que no se
+  /// escribía en el formulario hasta pulsar "continuar". Como el precio se
+  /// calcula del formulario, en esta pantalla **el selector no movía el
+  /// precio**: se podía elegir "Electrodomésticos" y seguir viendo la tarifa
+  /// de los muebles.
+  ///
+  /// Ahora escribe en el formulario en el acto. Si ya había artículos
+  /// elegidos en el paso anterior, el precio los tiene por encima del tipo y
+  /// el selector parecería no hacer nada, así que se quitan y se avisa: mejor
+  /// un cambio dicho en voz alta que un control que no hace nada.
+  void _onLoadTypeSelected(String type) {
+    setState(() => _selectedLoadType = type);
+
+    final notifier = ref.read(serviceFormProvider.notifier);
+    notifier.setLoadType(type);
+
+    final items = ref.read(serviceFormProvider)['items'] as List?;
+    if (items != null && items.isNotEmpty) {
+      notifier.setItems(const []);
+      showMuevexSnackBar(
+        context,
+        message: 'Se quitó la lista de artículos al cambiar el tipo de carga',
+        icon: Icons.inventory_2_outlined,
+      );
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Build
   // -------------------------------------------------------------------------
@@ -421,21 +487,15 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
     // Badge flotante de ruta: solo cuando el camino vial ya está listo.
     final route = routeState.route;
     final badgeKm = route?.distanceKm ?? 0.0;
-    final badgeMinutes =
-        (route?.durationSeconds ?? 0).toDouble() / 60.0;
+    final badgeMinutes = (route?.durationSeconds ?? 0).toDouble() / 60.0;
     final badgePrice = route != null
-        ? PriceCalculator.calculateRecommendedPrice(
-            distanceKm: route.distanceKm,
-            serviceType: _selectedLoadType,
-            needsHelp: (form['needsHelp'] as bool?) ?? false,
-            floors: (form['floors'] ?? 0) as int,
-          )
+        ? TarifaEngine.calcular(
+            entradaDesdeFormulario(form, route.distanceKm),
+          ).total
         : 0.0;
-    final showBadge =
-        routeState.status == RouteStatus.success &&
+    final showBadge = routeState.status == RouteStatus.success &&
         route != null &&
-        (_destination != null ||
-            ((form['destinationLat'] as num?) ?? 0) != 0);
+        (_destination != null || ((form['destinationLat'] as num?) ?? 0) != 0);
 
     // Cuando la ruta se calcula, encuadra la cámara sobre la geometría vial.
     ref.listen<MapRouteState>(mapRouteProvider, (previous, next) {
@@ -446,6 +506,14 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
       _fitRouteToCamera(LatLngBounds.fromPoints(points));
     });
 
+    // Las alturas declaradas en cada `Marker` son el espacio que le da
+    // flutter_map al pin; el `Marker` pone el borde INFERIOR de esa caja
+    // exactamente sobre la coordenada. Los pins usan
+    // `MainAxisAlignment.end` (ver `_OriginPin`/`_DestinationPin`) para que la
+    // punta quede pegada a ese borde: si la etiqueta crece con el tamaño de
+    // letra, crece hacia arriba y la punta no se mueve. Antes el `SizedBox`
+    // de cada pin medía menos que su contenido y la punta quedaba 6 px fuera
+    // del punto.
     final markers = <Marker>[
       if (_userLocation != null)
         Marker(
@@ -456,11 +524,10 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
         ),
       if (_origin != null && _isCustomOrigin)
         Marker(
-          key: ValueKey(
-              'origin-${_origin!.latitude}-${_origin!.longitude}'),
+          key: ValueKey('origin-${_origin!.latitude}-${_origin!.longitude}'),
           point: _origin!,
           width: 44,
-          height: 52,
+          height: 56,
           alignment: Alignment.bottomCenter,
           child: const _PinDropper(child: _OriginPin()),
         ),
@@ -470,7 +537,7 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
               '-${_destination!.longitude}'),
           point: _destination!,
           width: 116,
-          height: 74,
+          height: 96,
           alignment: Alignment.bottomCenter,
           child: _PinDropper(
             child: _DestinationPin(
@@ -518,15 +585,13 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
                         duration: const Duration(milliseconds: 250),
                         switchInCurve: Curves.easeOutCubic,
                         switchOutCurve: Curves.easeInCubic,
-                        transitionBuilder: (child, animation) =>
-                            FadeTransition(
+                        transitionBuilder: (child, animation) => FadeTransition(
                           opacity: animation,
                           child: SlideTransition(
-                            position:
-                                Tween<Offset>(
-                                      begin: const Offset(0, -0.12),
-                                      end: Offset.zero,
-                                    ).animate(animation),
+                            position: Tween<Offset>(
+                              begin: const Offset(0, -0.12),
+                              end: Offset.zero,
+                            ).animate(animation),
                             child: child,
                           ),
                         ),
@@ -544,8 +609,7 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
                                 key: const ValueKey('selector'),
                                 originName: _originName,
                                 destinationName: _destinationName,
-                                onTapOrigin: () =>
-                                    _openSearch(forOrigin: true),
+                                onTapOrigin: () => _openSearch(forOrigin: true),
                                 onTapDestination: () =>
                                     _openSearch(forOrigin: false),
                                 onUseMyLocation: _useCurrentLocation,
@@ -610,8 +674,8 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
   Widget _buildBottomSheet(Size size) {
     final form = ref.watch(serviceFormProvider);
     final routeState = ref.watch(mapRouteProvider);
-    final hasDestination = _destination != null ||
-        ((form['destinationLat'] as num?) ?? 0) != 0;
+    final hasDestination =
+        _destination != null || ((form['destinationLat'] as num?) ?? 0) != 0;
 
     // Distancia, duración y precio basados en la ruta vial real. Mientras la
     // ruta no esté lista se usan la distancia geodésica y su precio de
@@ -621,17 +685,20 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
     final needsHelp = (form['needsHelp'] as bool?) ?? false;
     final serviceFloors = (form['floors'] ?? 0) as int;
     final fallbackDistance = ref.watch(recommendedDistanceKmProvider);
-    final fallbackPrice = ref.watch(recommendedPriceProvider);
     final shownKm = routeKm > 0 ? routeKm : fallbackDistance;
     final shownMinutes = routeMinutes > 0 ? (routeMinutes / 60) : 0.0;
-    final shownPrice = routeKm > 0
-        ? PriceCalculator.calculateRecommendedPrice(
-            distanceKm: routeKm,
-            serviceType: _selectedLoadType,
-            needsHelp: needsHelp,
-            floors: serviceFloors,
-          )
-        : fallbackPrice;
+
+    // UNA sola tarifa para el precio y para el desglose.
+    //
+    // Antes se calculaba dos veces: el precio con `entradaDesdeFormulario` (que
+    // respalda al tipo de carga cuando no hay artículos) y el desglose con una
+    // entrada armada a mano que solo miraba los artículos. Con la carga inicial
+    // —artículos vacíos, que es justo como empieza esta pantalla— un servicio
+    // de muebles se cotizaba en $55.000 y el desglose decía $25.000.
+    final tarifaResumen = TarifaEngine.calcular(
+      entradaDesdeFormulario(form, shownKm),
+    );
+    final shownPrice = tarifaResumen.total;
     debugPrint('MUEVEX summary status=${routeState.status.name} '
         'km=${shownKm.toStringAsFixed(3)} min=${shownMinutes.toStringAsFixed(1)} '
         'price=\$${shownPrice.toStringAsFixed(0)}');
@@ -647,10 +714,10 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
         return Container(
           decoration: BoxDecoration(
             color: MuevexTheme.surfaceOf(context),
-            borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24)),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             boxShadow: [
-              BoxShadow(color: Colors.black38, blurRadius: 20, offset: Offset(0, -4)),
+              BoxShadow(
+                  color: Colors.black38, blurRadius: 20, offset: Offset(0, -4)),
             ],
           ),
           child: Column(
@@ -676,22 +743,20 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
                       const SizedBox(height: 14),
                       LoadTypeSelector(
                         selected: _selectedLoadType,
-                        onSelect: (type) =>
-                            setState(() => _selectedLoadType = type),
+                        onSelect: _onLoadTypeSelected,
                       ),
                       const SizedBox(height: 16),
-
                       if (hasDestination) ...[
                         const Divider(height: 24),
                         _TripSummary(
                           originName: _originName ?? 'Mi ubicación',
                           destinationName: _destinationName,
-                          hasOrigin:
-                              _origin != null ||
+                          hasOrigin: _origin != null ||
                               ((form['originLat'] as num?) ?? 0) != 0,
                           distanceKm: shownKm,
                           durationMinutes: shownMinutes,
                           price: shownPrice,
+                          tarifa: tarifaResumen,
                           serviceType: _selectedLoadType,
                           needsHelp: needsHelp,
                           floors: serviceFloors,
@@ -736,8 +801,7 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
                             child: const Row(
                               children: [
                                 Icon(Icons.touch_app,
-                                    size: 18,
-                                    color: MuevexTheme.primaryColor),
+                                    size: 18, color: MuevexTheme.primaryColor),
                                 SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
@@ -754,7 +818,6 @@ class _RequestMapPageState extends ConsumerState<RequestMapPage>
                           ),
                         ),
                       ],
-
                       const SizedBox(height: 16),
                       Center(
                         child: Text(
@@ -805,7 +868,8 @@ class _RouteInfoBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: Colors.white24),
         boxShadow: const [
-          BoxShadow(color: Colors.black38, blurRadius: 12, offset: Offset(0, 4)),
+          BoxShadow(
+              color: Colors.black38, blurRadius: 12, offset: Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -815,7 +879,7 @@ class _RouteInfoBadge extends StatelessWidget {
           Text(
             distanceKm > 0
                 ? '${distanceKm.toStringAsFixed(1)} km · '
-                      '${durationMinutes.round()} min'
+                    '${durationMinutes.round()} min'
                 : 'Calculando ruta…',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -828,7 +892,7 @@ class _RouteInfoBadge extends StatelessWidget {
           if (price > 0) ...[
             const SizedBox(height: 2),
             Text(
-              'Precio est. ${money(price)}',
+              'Precio est. ${moneyConIva(price)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -887,31 +951,30 @@ class _OriginPin extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 44,
-      height: 52,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: MuevexTheme.successColor,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-              boxShadow: const [
-                BoxShadow(color: Colors.black38, blurRadius: 6),
-              ],
-            ),
-            child: const Icon(Icons.trip_origin, color: Colors.white, size: 18),
+    // Sin `SizedBox` propio: el `Marker` da el tamaño exacto (44x56) y
+    // `MainAxisAlignment.end` ancla la punta a la coordenada.
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: MuevexTheme.successColor,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [
+              BoxShadow(color: Colors.black38, blurRadius: 6),
+            ],
           ),
-          const CustomPaint(
-            size: Size(12, 8),
-            painter: _PinTailPainter(MuevexTheme.successColor),
-          ),
-        ],
-      ),
+          child: const Icon(Icons.trip_origin, color: Colors.white, size: 18),
+        ),
+        const CustomPaint(
+          size: Size(12, 8),
+          painter: _PinTailPainter(MuevexTheme.successColor),
+        ),
+      ],
     );
   }
 }
@@ -923,57 +986,55 @@ class _DestinationPin extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 116,
-      height: 74,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            constraints: const BoxConstraints(maxWidth: 110),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: const Color(0xFF111827).withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
+    // Etiqueta arriba, círculo y punta abajo: la punta es lo último del
+    // Column, así que con `MainAxisAlignment.end` cae exactamente sobre la
+    // coordenada (borde inferior de la caja del `Marker`).
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          constraints: const BoxConstraints(maxWidth: 110),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xFF111827).withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [MuevexTheme.secondaryColor, Color(0xFFFF8F5F)],
-              ),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2.5),
-              boxShadow: const [
-                BoxShadow(color: Colors.black45, blurRadius: 8),
-              ],
+        ),
+        const SizedBox(height: 4),
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [MuevexTheme.secondaryColor, Color(0xFFFF8F5F)],
             ),
-            child: const Icon(Icons.place_rounded,
-                color: Colors.white, size: 22),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: const [
+              BoxShadow(color: Colors.black45, blurRadius: 8),
+            ],
           ),
-          const CustomPaint(
-            size: Size(14, 9),
-            painter: _PinTailPainter(MuevexTheme.secondaryColor),
-          ),
-        ],
-      ),
+          child: const Icon(Icons.place_rounded, color: Colors.white, size: 22),
+        ),
+        const CustomPaint(
+          size: Size(14, 9),
+          painter: _PinTailPainter(MuevexTheme.secondaryColor),
+        ),
+      ],
     );
   }
 }
@@ -1024,6 +1085,11 @@ class _TripSummary extends StatelessWidget {
   final double distanceKm;
   final double durationMinutes;
   final double price;
+
+  /// La tarifa ya calculada de la que sale [price]. El desglose se pinta desde
+  /// aquí y no desde una segunda cuenta, para que no puedan discrepar.
+  final Tarifa tarifa;
+
   final String serviceType;
   final bool needsHelp;
   final int floors;
@@ -1038,6 +1104,7 @@ class _TripSummary extends StatelessWidget {
     required this.distanceKm,
     required this.durationMinutes,
     required this.price,
+    required this.tarifa,
     required this.serviceType,
     required this.needsHelp,
     required this.floors,
@@ -1119,7 +1186,8 @@ class _TripSummary extends StatelessWidget {
                 Expanded(
                   child: Text(
                     routeError ?? 'No se pudo calcular la ruta.',
-                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
+                    style: const TextStyle(
+                        fontSize: 12.5, color: Color(0xFF6B7280)),
                   ),
                 ),
                 TextButton(
@@ -1170,7 +1238,7 @@ class _TripSummary extends StatelessWidget {
               child: _SummaryMetric(
                 icon: Icons.sell_outlined,
                 label: 'Precio est.',
-                value: price > 0 ? money(price) : '--',
+                value: price > 0 ? moneyConIva(price) : '--',
                 highlight: true,
               ),
             ),
@@ -1188,16 +1256,10 @@ class _TripSummary extends StatelessWidget {
           Align(
             alignment: Alignment.centerRight,
             child: TextButton.icon(
-              onPressed: () => showPriceBreakdownSheet(
-                context,
-                distanceKm: distanceKm,
-                serviceType: serviceType,
-                needsHelp: needsHelp,
-                floors: floors,
-              ),
+              onPressed: () => showPriceBreakdownSheet(context, tarifa: tarifa),
               style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 minimumSize: const Size(0, 32),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
@@ -1254,7 +1316,8 @@ class _SummaryMetric extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             label,
-            style: TextStyle(fontSize: 11, color: MuevexTheme.secondaryTextOf(context)),
+            style: TextStyle(
+                fontSize: 11, color: MuevexTheme.secondaryTextOf(context)),
           ),
           const SizedBox(height: 2),
           Text(

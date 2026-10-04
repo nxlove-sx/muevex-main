@@ -132,6 +132,38 @@ class Service extends Equatable {
   final bool loadingHelp;
   final List<String> photos;
 
+  // ── Campos del motor de tarifas TRANSPERSQUI (v2) ────────────────────────
+
+  /// Artículos seleccionados por el cliente: [{"id":"lavadora","cantidad":1}].
+  final List<Map<String, dynamic>> items;
+
+  /// Pisos en la recogida (subida/bajada manual por escaleras).
+  final int floorsPickup;
+
+  /// Pisos en la entrega.
+  final int floorsDelivery;
+
+  /// Número de viajes (1 = normal, 2 = 85 %, 3+ = 80 % por viaje).
+  final int trips;
+
+  /// Quién pone el ayudante: 'incluido' | 'cliente' | 'plataforma'.
+  final String helperOrigin;
+
+  /// Peso total estimado a partir del catálogo de artículos.
+  final double estimatedWeightKg;
+
+  /// Volumen estimado en m³.
+  final double estimatedVolumeM3;
+
+  /// Categoría de motocarro sugerida por el peso ('200' | '250' | '300' | '500').
+  final String? vehicleCategory;
+
+  /// Desglose exacto con el que se cotizó (para el comprobante).
+  final Map<String, dynamic>? tariffBreakdown;
+
+  /// Versión de la tabla de precios usada: 'legacy' | 'v2' | ...
+  final String? tariffVersion;
+
   final DateTime createdAt;
   final DateTime? acceptedAt;
   final DateTime? startedAt;
@@ -183,6 +215,17 @@ class Service extends Equatable {
     this.loadPhotos = const [],
     this.loadDetails = const {},
     this.recommendedPrice = 0,
+    // Tarifas v2
+    this.items = const [],
+    this.floorsPickup = 0,
+    this.floorsDelivery = 0,
+    this.trips = 1,
+    this.helperOrigin = 'incluido',
+    this.estimatedWeightKg = 0,
+    this.estimatedVolumeM3 = 0,
+    this.vehicleCategory,
+    this.tariffBreakdown,
+    this.tariffVersion,
   });
 
   /// Precio que se muestra en la UI (canónico, con respaldo legacy).
@@ -201,9 +244,13 @@ class Service extends Equatable {
       driverId: map['driver_id'] as String?,
       status: ServiceStatusMapping.fromDbName(map['status'] as String),
       priceBase: (map['price_base'] as num?)?.toDouble() ?? 0.0,
-      priceOffer: map['price_offer'] != null ? (map['price_offer'] as num).toDouble() : null,
+      priceOffer: map['price_offer'] != null
+          ? (map['price_offer'] as num).toDouble()
+          : null,
       estimatedPrice: estimated,
-      finalPrice: map['final_price'] != null ? (map['final_price'] as num).toDouble() : null,
+      finalPrice: map['final_price'] != null
+          ? (map['final_price'] as num).toDouble()
+          : null,
       platformFee: (map['platform_fee'] as num?)?.toDouble() ?? 0.0,
       driverEarnings: (map['driver_earnings'] as num?)?.toDouble() ?? 0.0,
       originLat: (map['origin_lat'] as num?)?.toDouble() ?? 0.0,
@@ -249,6 +296,23 @@ class Service extends Equatable {
           ? Map<String, dynamic>.from(map['load_details'])
           : {},
       recommendedPrice: (map['recommended_price'] as num?)?.toDouble() ?? 0.0,
+      // Tarifas v2
+      items: map['items'] != null
+          ? List<Map<String, dynamic>>.from(map['items'])
+          : const [],
+      floorsPickup: (map['floors_pickup'] as num?)?.toInt() ?? 0,
+      floorsDelivery: (map['floors_delivery'] as num?)?.toInt() ?? 0,
+      trips: (map['trips'] as num?)?.toInt() ?? 1,
+      helperOrigin: map['helper_origin'] as String? ?? 'incluido',
+      estimatedWeightKg:
+          (map['estimated_weight_kg'] as num?)?.toDouble() ?? 0.0,
+      estimatedVolumeM3:
+          (map['estimated_volume_m3'] as num?)?.toDouble() ?? 0.0,
+      vehicleCategory: map['vehicle_category'] as String?,
+      tariffBreakdown: map['tariff_breakdown'] != null
+          ? Map<String, dynamic>.from(map['tariff_breakdown'])
+          : null,
+      tariffVersion: map['tariff_version'] as String?,
     );
   }
 
@@ -285,6 +349,17 @@ class Service extends Equatable {
       'accepted_at': acceptedAt?.toIso8601String(),
       'started_at': startedAt?.toIso8601String(),
       'completed_at': completedAt?.toIso8601String(),
+      // Tarifas v2
+      'items': items,
+      'floors_pickup': floorsPickup,
+      'floors_delivery': floorsDelivery,
+      'trips': trips,
+      'helper_origin': helperOrigin,
+      'estimated_weight_kg': estimatedWeightKg,
+      'estimated_volume_m3': estimatedVolumeM3,
+      'vehicle_category': vehicleCategory,
+      'tariff_breakdown': tariffBreakdown,
+      'tariff_version': tariffVersion,
     };
   }
 
@@ -320,6 +395,17 @@ class Service extends Equatable {
     DateTime? acceptedAt,
     DateTime? startedAt,
     DateTime? completedAt,
+    // Tarifas v2
+    List<Map<String, dynamic>>? items,
+    int? floorsPickup,
+    int? floorsDelivery,
+    int? trips,
+    String? helperOrigin,
+    double? estimatedWeightKg,
+    double? estimatedVolumeM3,
+    String? vehicleCategory,
+    Map<String, dynamic>? tariffBreakdown,
+    String? tariffVersion,
   }) {
     return Service(
       id: id ?? this.id,
@@ -353,41 +439,61 @@ class Service extends Equatable {
       acceptedAt: acceptedAt ?? this.acceptedAt,
       startedAt: startedAt ?? this.startedAt,
       completedAt: completedAt ?? this.completedAt,
+      items: items ?? this.items,
+      floorsPickup: floorsPickup ?? this.floorsPickup,
+      floorsDelivery: floorsDelivery ?? this.floorsDelivery,
+      trips: trips ?? this.trips,
+      helperOrigin: helperOrigin ?? this.helperOrigin,
+      estimatedWeightKg: estimatedWeightKg ?? this.estimatedWeightKg,
+      estimatedVolumeM3: estimatedVolumeM3 ?? this.estimatedVolumeM3,
+      vehicleCategory: vehicleCategory ?? this.vehicleCategory,
+      tariffBreakdown: tariffBreakdown ?? this.tariffBreakdown,
+      tariffVersion: tariffVersion ?? this.tariffVersion,
     );
   }
 
   @override
   List<Object?> get props => [
-    id,
-    customerId,
-    driverId,
-    status,
-    priceBase,
-    priceOffer,
-    estimatedPrice,
-    finalPrice,
-    platformFee,
-    driverEarnings,
-    originLat,
-    originLng,
-    destinationLat,
-    destinationLng,
-    origin,
-    destination,
-    originName,
-    destinationName,
-    description,
-    distanceKm,
-    durationMinutes,
-    loadType,
-    loadDescription,
-    loadWeightKg,
-    floors,
-    loadingHelp,
-    photos,
-    createdAt,
-    acceptedAt,
-    startedAt,
-    completedAt,
-  ];
+        id,
+        customerId,
+        driverId,
+        status,
+        priceBase,
+        priceOffer,
+        estimatedPrice,
+        finalPrice,
+        platformFee,
+        driverEarnings,
+        originLat,
+        originLng,
+        destinationLat,
+        destinationLng,
+        origin,
+        destination,
+        originName,
+        destinationName,
+        description,
+        distanceKm,
+        durationMinutes,
+        loadType,
+        loadDescription,
+        loadWeightKg,
+        floors,
+        loadingHelp,
+        photos,
+        createdAt,
+        acceptedAt,
+        startedAt,
+        completedAt,
+        items,
+        floorsPickup,
+        floorsDelivery,
+        trips,
+        helperOrigin,
+        estimatedWeightKg,
+        estimatedVolumeM3,
+        vehicleCategory,
+        tariffBreakdown,
+        tariffVersion,
+      ];
 }

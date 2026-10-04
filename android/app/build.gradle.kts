@@ -6,12 +6,20 @@ plugins {
 
 android {
     namespace = "com.example.muevex"
+    // Android 15 (API 36). El SDK actual publica la API 37 con versionado
+    // menor (carpeta `android-37.0`), que el AGP 9 no resuelve como `android-37`,
+    // así que se compila contra 36, que es estable y compatible con todos los
+    // plugins usados.
     compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // flutter_local_notifications y flutter_secure_storage exigen
+        // "core library desugaring" para usar APIs de java.time en Android
+        // antiguo. Sin esto Gradle aborta el build.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -45,4 +53,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Requerido por flutter_local_notifications / flutter_secure_storage.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

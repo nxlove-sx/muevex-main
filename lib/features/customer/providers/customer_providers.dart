@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:muevex/core/models/customer_profile_model.dart';
 import 'package:muevex/core/models/service_model.dart';
+import 'package:muevex/core/models/invoice_model.dart';
 import 'package:muevex/features/auth/providers/auth_provider.dart';
 import 'package:muevex/core/supabase/supabase_client.dart';
 
@@ -24,8 +26,7 @@ final customerProfileProvider = FutureProvider<CustomerProfile?>((ref) async {
 // La home separa en "Mis servicios" (pendientes + activos con conductor) y
 // "Servicios anteriores" (completados/cancelados). RLS ya restringe a
 // customer_id = auth.uid().
-final customerServicesProvider =
-    FutureProvider<List<Service>>((ref) async {
+final customerServicesProvider = FutureProvider<List<Service>>((ref) async {
   final user = ref.watch(authProvider).value;
   if (user == null) return <Service>[];
 
@@ -44,6 +45,8 @@ final customerServicesProvider =
           value: user.id,
         ),
         callback: (payload) {
+          debugPrint(
+              'MUEVEX realtime services: event=${payload.eventType} newRecord=${payload.newRecord['id']} status=${payload.newRecord['status']} driver_id=${payload.newRecord['driver_id']}');
           HapticFeedback.mediumImpact();
           ref.invalidateSelf();
         },
@@ -54,6 +57,24 @@ final customerServicesProvider =
   return getUserServices(user.id);
 });
 
+/// Facturas emitidas del cliente actual, indexadas por `service_id`.
+///
+/// Se carga una sola vez y se reparte entre las tarjetas: el historial llega a
+/// tener decenas de servicios y consultar las facturas una por una desde cada
+/// tarjeta era una petición por fila.
+///
+/// Solo se guardan las **emitidas**: una minifactura en borrador todavía no se
+/// puede enseñar, así que no debe ofrecer un botón que no lleva a ninguna
+/// parte. Publicar la minifactura es justo el paso que la pasa a `emitida`.
+final myInvoicesByServiceProvider =
+    FutureProvider<Map<String, Invoice>>((ref) async {
+  final user = ref.watch(authProvider).value;
+  if (user == null) return <String, Invoice>{};
+
+  final invoices = await getMyInvoices(status: InvoiceStatus.emitida);
+  return {for (final inv in invoices) inv.serviceId: inv};
+});
+
 // Current service provider - servicio activo
 final currentCustomerServiceProvider = StateProvider<Service?>((ref) => null);
 
@@ -61,7 +82,8 @@ final currentCustomerServiceProvider = StateProvider<Service?>((ref) => null);
 final customerPriceProvider = StateProvider<double>((ref) => 0.0);
 
 // Service status provider para cliente
-final customerServiceStatusProvider = StateNotifierProvider<CustomerServiceStatusNotifier, ServiceStatus>(
+final customerServiceStatusProvider =
+    StateNotifierProvider<CustomerServiceStatusNotifier, ServiceStatus>(
   (ref) => CustomerServiceStatusNotifier(),
 );
 
@@ -74,10 +96,13 @@ class CustomerServiceStatusNotifier extends StateNotifier<ServiceStatus> {
 }
 
 // Selected locations
-final selectedOriginProvider = StateProvider<Map<String, dynamic>?>((ref) => null);
-final selectedDestinationProvider = StateProvider<Map<String, dynamic>?>((ref) => null);
+final selectedOriginProvider =
+    StateProvider<Map<String, dynamic>?>((ref) => null);
+final selectedDestinationProvider =
+    StateProvider<Map<String, dynamic>?>((ref) => null);
 
 // Nearby drivers provider
-final nearbyDriversProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final nearbyDriversProvider =
+    FutureProvider<List<Map<String, dynamic>>>((ref) async {
   return <Map<String, dynamic>>[];
 });

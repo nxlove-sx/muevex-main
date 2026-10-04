@@ -34,7 +34,8 @@ class PriceCalculator {
     required String serviceType,
     required bool needsHelp,
     required int floors,
-    String? hourPeriod, // 'early_morning', 'morning', 'afternoon', 'evening', 'night'
+    String?
+        hourPeriod, // 'early_morning', 'morning', 'afternoon', 'evening', 'night'
   }) {
     // 1. Tarifa base
     double price = baseFare;
@@ -90,7 +91,8 @@ class PriceCalculator {
       (key) => serviceTypeMultipliers[key] == typeMultiplier,
       orElse: () => 'muebles',
     );
-    parts.add('Tipo servicio ($typeName): ${(baseFare * typeMultiplier).toStringAsFixed(0)}');
+    parts.add(
+        'Tipo servicio ($typeName): ${(baseFare * typeMultiplier).toStringAsFixed(0)}');
 
     // Ayuda de carga
     if (needsHelp) {
@@ -99,13 +101,15 @@ class PriceCalculator {
 
     // Pisos
     if (floors > 0) {
-      parts.add('$floors pisos: ${(floors * floorsFeePerFloor).toStringAsFixed(0)}');
+      parts.add(
+          '$floors pisos: ${(floors * floorsFeePerFloor).toStringAsFixed(0)}');
     }
 
     // Horario
     if (hourPeriod != null && hourMultipliers.containsKey(hourPeriod)) {
       final multiplier = hourMultipliers[hourPeriod]!;
-      final hourlyText = multiplier > 1.0 ? 'aumento horario' : 'descuento horario';
+      final hourlyText =
+          multiplier > 1.0 ? 'aumento horario' : 'descuento horario';
       parts.add('$hourlyText ($hourPeriod): x$multiplier');
     }
 

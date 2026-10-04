@@ -58,7 +58,8 @@ class MapRouteNotifier extends StateNotifier<MapRouteState> {
       final route =
           await _service.getRoute(origin: origin, destination: destination);
       if (!mounted || generation != _generation) return;
-      debugPrint('MUEVEX route OK distance=${route.distanceKm.toStringAsFixed(3)}km '
+      debugPrint(
+          'MUEVEX route OK distance=${route.distanceKm.toStringAsFixed(3)}km '
           'duration=${route.durationSeconds.toStringAsFixed(0)}s '
           'points=${route.points.length}');
       state = MapRouteState._(status: RouteStatus.success, route: route);

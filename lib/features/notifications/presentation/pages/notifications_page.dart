@@ -1,33 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:muevex/core/models/notification_model.dart';
-import 'package:muevex/core/supabase/supabase_client.dart';
 import 'package:muevex/core/supabase/supabase_client.dart' as api;
 import 'package:muevex/core/themes/muevex_theme.dart';
+import 'package:muevex/core/widgets/animations.dart';
 import 'package:muevex/core/widgets/muevex_app_bar.dart';
 import 'package:muevex/core/widgets/state_views.dart';
 import 'package:muevex/features/auth/providers/auth_provider.dart';
 
-final notificationsProvider = FutureProvider<List<AppNotification>>((ref) async {
+/// Bandeja de notificaciones del cliente actual.
+///
+/// NOTA: la suscripción Realtime + la notificación con sonido viven en
+/// `core/services/realtime_notification_listener.dart`, que se escucha desde la
+/// raíz de la app para que suene aunque esta página no esté abierta. Aquí solo
+/// se cargan los datos; el listener invalida este provider cuando entra algo
+/// nuevo.
+final notificationsProvider =
+    FutureProvider<List<AppNotification>>((ref) async {
   final user = ref.watch(authProvider).value;
   if (user == null) return <AppNotification>[];
-  final channel = supabase
-      .channel('customer-notifications:${user.id}')
-      .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'notifications',
-        filter: PostgresChangeFilter(
-          column: 'user_id',
-          type: PostgresChangeFilterType.eq,
-          value: user.id,
-        ),
-        callback: (_) => ref.invalidateSelf(),
-      )
-      .subscribe();
-  ref.onDispose(channel.unsubscribe);
   return api.getMyNotifications(user.id);
 });
 
@@ -69,14 +61,12 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
         loading: () =>
             const BrandLoadingView(message: 'Cargando notificaciones…'),
         error: (e, _) => MuevexErrorView(
-          message:
-              'No pudimos cargar tus notificaciones. '
+          message: 'No pudimos cargar tus notificaciones. '
               'Verifica tu conexión e inténtalo de nuevo.',
           onRetry: () => ref.invalidate(notificationsProvider),
         ),
         data: (list) => RefreshIndicator(
-          onRefresh: () async =>
-              ref.invalidate(notificationsProvider),
+          onRefresh: () async => ref.invalidate(notificationsProvider),
           child: list.isEmpty
               ? ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -86,8 +76,7 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
                     MuevexEmptyView(
                       icon: Icons.notifications_off_outlined,
                       title: 'Sin notificaciones',
-                      subtitle:
-                          'Aquí verás los avisos de tus servicios: '
+                      subtitle: 'Aquí verás los avisos de tus servicios: '
                           'conductor asignado, estado del viaje y más.',
                     ),
                   ],
@@ -96,7 +85,13 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.all(12),
                   itemCount: list.length,
-                  itemBuilder: (_, i) => _NotificationTile(n: list[i]),
+                  itemBuilder: (_, i) => StaggeredEntrance(
+                    // Escalonado por posición: los primeros avisos se ven
+                    // enseguida y el resto entra detrás, en vez de aparecer
+                    // la lista entera de golpe.
+                    index: i,
+                    child: _NotificationTile(n: list[i]),
+                  ),
                 ),
         ),
       ),
@@ -110,18 +105,15 @@ class _NotificationTile extends StatelessWidget {
 
   (IconData, Color) get _style {
     return switch (n.type) {
-      'service_accepted' =>
-        (Icons.check_circle, MuevexTheme.successColor),
-      'service_arrival' =>
-        (Icons.place, MuevexTheme.primaryColor),
-      'service_started' =>
-        (Icons.local_shipping, MuevexTheme.accentColor),
-      'service_completed' =>
-        (Icons.celebration, MuevexTheme.successColor),
-      'service_cancelled' || 'service_cancelled_by_driver' =>
-        (Icons.cancel, MuevexTheme.errorColor),
-      'new_rating' =>
-        (Icons.star_rounded, MuevexTheme.warningColor),
+      'service_accepted' => (Icons.check_circle, MuevexTheme.successColor),
+      'service_arrival' => (Icons.place, MuevexTheme.primaryColor),
+      'service_started' => (Icons.local_shipping, MuevexTheme.accentColor),
+      'service_completed' => (Icons.celebration, MuevexTheme.successColor),
+      'service_cancelled' || 'service_cancelled_by_driver' => (
+          Icons.cancel,
+          MuevexTheme.errorColor
+        ),
+      'new_rating' => (Icons.star_rounded, MuevexTheme.warningColor),
       _ => (Icons.notifications_rounded, MuevexTheme.primaryColor),
     };
   }
@@ -158,7 +150,10 @@ class _NotificationTile extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [color.withValues(alpha: 0.9), color.withValues(alpha: 0.55)],
+              colors: [
+                color.withValues(alpha: 0.9),
+                color.withValues(alpha: 0.55)
+              ],
             ),
             shape: BoxShape.circle,
           ),
@@ -173,7 +168,8 @@ class _NotificationTile extends StatelessWidget {
         ),
         subtitle: Text(
           n.message,
-          style: TextStyle(fontSize: 12.5, color: MuevexTheme.secondaryTextOf(context)),
+          style: TextStyle(
+              fontSize: 12.5, color: MuevexTheme.secondaryTextOf(context)),
         ),
         isThreeLine: n.message.length > 50,
         trailing: Row(

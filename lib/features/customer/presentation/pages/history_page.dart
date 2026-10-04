@@ -6,6 +6,7 @@ import 'package:muevex/core/models/service_model.dart';
 import 'package:muevex/core/themes/muevex_theme.dart';
 import 'package:muevex/core/utils/money.dart';
 import 'package:muevex/core/widgets/muevex_app_bar.dart';
+import 'package:muevex/core/widgets/invoice_sheet.dart';
 import 'package:muevex/core/widgets/state_views.dart';
 import 'package:muevex/core/widgets/skeleton_shimmer.dart';
 import 'package:muevex/features/customer/providers/customer_providers.dart';
@@ -17,6 +18,12 @@ class HistoryPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(customerServicesProvider);
+    // Se trae el mapa una vez y se usa como función. Si todavía no ha
+    // llegado, `invoiceIdFor` es null y las tarjetas salen sin botón de
+    // factura en vez de con un botón que no abre nada.
+    final invoices = ref.watch(myInvoicesByServiceProvider).value;
+    final invoiceIdFor =
+        invoices == null ? null : (String serviceId) => invoices[serviceId]?.id;
 
     return Scaffold(
       appBar: MuevexGradientAppBar(
@@ -33,14 +40,20 @@ class HistoryPage extends ConsumerWidget {
             return const MuevexEmptyView(
               icon: Icons.history_rounded,
               title: 'Aún no tienes historial',
-              subtitle: 'Tus servicios completados o cancelados aparecerán aquí.',
+              subtitle:
+                  'Tus servicios completados o cancelados aparecerán aquí.',
             );
           }
           return RefreshIndicator(
             onRefresh: () async {
               ref.invalidate(customerServicesProvider);
-              await ref.read(customerServicesProvider.future).catchError(
-                  (_) => const <Service>[]);
+              // También las facturas: si se acaba de generar una desde la
+              // pantalla principal, al volver al historial tiene que verse el
+              // botón de factura sin tener que reiniciar la app.
+              ref.invalidate(myInvoicesByServiceProvider);
+              await ref
+                  .read(customerServicesProvider.future)
+                  .catchError((_) => const <Service>[]);
             },
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -50,8 +63,10 @@ class HistoryPage extends ConsumerWidget {
                 final service = history[index];
                 return _HistoryCard(
                   service: service,
+                  invoiceId: invoiceIdFor?.call(service.id),
                   onRepeat: () {
-                    ref.read(serviceFormProvider.notifier)
+                    ref
+                        .read(serviceFormProvider.notifier)
                         .fillFromService(service);
                     context.go('/service/create');
                   },
@@ -82,8 +97,13 @@ class HistoryPage extends ConsumerWidget {
 
 class _HistoryCard extends StatelessWidget {
   final Service service;
+  final String? invoiceId;
   final VoidCallback? onRepeat;
-  const _HistoryCard({required this.service, this.onRepeat});
+  const _HistoryCard({
+    required this.service,
+    this.invoiceId,
+    this.onRepeat,
+  });
 
   bool get _completed => service.status == ServiceStatus.completado;
 
@@ -133,7 +153,9 @@ class _HistoryCard extends StatelessWidget {
                   '${_two(date.day)}/${_two(date.month)}/${date.year} · '
                   '${_two(date.hour)}:${_two(date.minute)} · '
                   '${_statusLabelOf(service.status)}',
-                  style: TextStyle(fontSize: 11.5, color: MuevexTheme.secondaryTextOf(context)),
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      color: MuevexTheme.secondaryTextOf(context)),
                 ),
               ],
             ),
@@ -141,11 +163,40 @@ class _HistoryCard extends StatelessWidget {
           if (_completed && service.priceTotal > 0) ...[
             const SizedBox(width: 8),
             Text(
-              money(service.priceTotal),
+              moneyConIva(service.priceTotal),
               style: TextStyle(
                 color: MuevexTheme.successColor,
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          // La minifactura se abre desde la propia fila del pedido, al lado del
+          // precio. Solo aparece si ese servicio ya tiene una minifactura
+          // publicada.
+          if (_completed && invoiceId != null) ...[
+            const SizedBox(width: 6),
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => showInvoiceSheet(context, invoiceId: invoiceId!),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.receipt_long_outlined,
+                        size: 16, color: MuevexTheme.primaryColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Minifactura',
+                      style: TextStyle(
+                        color: MuevexTheme.primaryColor,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],

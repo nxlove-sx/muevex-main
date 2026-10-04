@@ -50,15 +50,17 @@ class _MapPointPickerState extends State<MapPointPicker> {
   void didUpdateWidget(MapPointPicker oldWidget) {
     super.didUpdateWidget(oldWidget);
     // Cuando cambian los puntos, encuadrar automáticamente la ruta/origen.
-    final route =
-        widget.origin != null && widget.destination != null;
-    if (route && (oldWidget.origin != widget.origin ||
-        oldWidget.destination != widget.destination)) {
+    final route = widget.origin != null && widget.destination != null;
+    if (route &&
+        (oldWidget.origin != widget.origin ||
+            oldWidget.destination != widget.destination)) {
       _fitBounds([widget.origin!, widget.destination!]);
-    } else if (!route && widget.origin != null &&
+    } else if (!route &&
+        widget.origin != null &&
         oldWidget.origin != widget.origin) {
       _fitPoint(widget.origin!);
-    } else if (widget.origin == null && widget.destination == null &&
+    } else if (widget.origin == null &&
+        widget.destination == null &&
         widget.userLocation != null &&
         oldWidget.userLocation != widget.userLocation) {
       _fitPoint(widget.userLocation!);
@@ -75,8 +77,8 @@ class _MapPointPickerState extends State<MapPointPicker> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final bounds = LatLngBounds.fromPoints(points);
-      _mapController.fitCamera(CameraFit.bounds(
-          bounds: bounds, padding: const EdgeInsets.all(56)));
+      _mapController.fitCamera(
+          CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(56)));
     });
   }
 
@@ -200,8 +202,8 @@ class _OriginMarker extends StatelessWidget {
         decoration: const BoxDecoration(
           color: MuevexTheme.successColor,
           shape: BoxShape.circle,
-          border: Border.fromBorderSide(
-              BorderSide(color: Colors.white, width: 2)),
+          border:
+              Border.fromBorderSide(BorderSide(color: Colors.white, width: 2)),
           boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
         ),
         child: const Icon(Icons.trip_origin, color: Colors.white, size: 16),
@@ -221,8 +223,8 @@ class _DestinationMarker extends StatelessWidget {
         decoration: const BoxDecoration(
           color: MuevexTheme.errorColor,
           shape: BoxShape.circle,
-          border: Border.fromBorderSide(
-              BorderSide(color: Colors.white, width: 2)),
+          border:
+              Border.fromBorderSide(BorderSide(color: Colors.white, width: 2)),
           boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
         ),
         child: const Icon(Icons.location_on, color: Colors.white, size: 16),
@@ -245,8 +247,8 @@ class _UserLocationMarker extends StatelessWidget {
             BorderSide(color: MuevexTheme.primaryLight, width: 3),
           ),
         ),
-        child:
-            const Icon(Icons.my_location, color: MuevexTheme.primaryLight, size: 14),
+        child: const Icon(Icons.my_location,
+            color: MuevexTheme.primaryLight, size: 14),
       ),
     );
   }

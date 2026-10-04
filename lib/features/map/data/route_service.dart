@@ -51,25 +51,26 @@ class RouteService {
 
     late http.Response response;
     try {
-      response = await _client
-          .get(
-            uri,
-            headers: const {
-              'User-Agent': 'muevex-app/1.0 (demo)',
-              'Accept': 'application/json',
-            },
-          )
-          .timeout(const Duration(seconds: _timeoutSeconds));
+      response = await _client.get(
+        uri,
+        headers: const {
+          'User-Agent': 'muevex-app/1.0 (demo)',
+          'Accept': 'application/json',
+        },
+      ).timeout(const Duration(seconds: _timeoutSeconds));
     } on TimeoutException {
-      throw const RouteException('El servidor de rutas tardó demasiado. Reintenta.');
+      throw const RouteException(
+          'El servidor de rutas tardó demasiado. Reintenta.');
     } on http.ClientException {
-      throw const RouteException('No hay conexión. No se pudo calcular la ruta.');
+      throw const RouteException(
+          'No hay conexión. No se pudo calcular la ruta.');
     } catch (_) {
       throw const RouteException('No se pudo calcular la ruta.');
     }
 
     if (response.statusCode != 200) {
-      throw RouteException('El servidor de rutas respondió ${response.statusCode}.');
+      throw RouteException(
+          'El servidor de rutas respondió ${response.statusCode}.');
     }
 
     final RouteResult result;

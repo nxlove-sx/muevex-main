@@ -34,9 +34,8 @@ class CustomButton extends StatelessWidget {
     final color = enabled
         ? backgroundColor ?? MuevexTheme.primaryColor
         : Colors.grey.shade300;
-    final foreground = enabled
-        ? textColor ?? Colors.white
-        : Colors.grey.shade600;
+    final foreground =
+        enabled ? textColor ?? Colors.white : Colors.grey.shade600;
     final radius = borderRadius ?? BorderRadius.circular(14);
     final bg = gradient ? MuevexTheme.primaryGradient : null;
 

@@ -94,8 +94,9 @@ class ProfilePage extends ConsumerWidget {
                         ),
                         Text(
                           userData?.email ?? '',
-                          style:
-                              TextStyle(fontSize: 16, color: MuevexTheme.secondaryTextOf(context)),
+                          style: TextStyle(
+                              fontSize: 16,
+                              color: MuevexTheme.secondaryTextOf(context)),
                         ),
                         const SizedBox(height: 8),
                         const Chip(
@@ -122,7 +123,8 @@ class ProfilePage extends ConsumerWidget {
                             customerProfile.phone ?? 'No registrado'),
                         _buildInfoRow(context, 'Dirección',
                             customerProfile.address ?? 'No registrada'),
-                        _buildInfoRow(context, 
+                        _buildInfoRow(
+                            context,
                             'Rating',
                             customerProfile.rating?.toStringAsFixed(1) ??
                                 'N/A'),
@@ -142,20 +144,26 @@ class ProfilePage extends ConsumerWidget {
                           style: TextStyle(
                               fontSize: 18, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 12),
-                      _actionTile(context, Icons.edit, 'Editar Perfil', () =>
-                          _editProfile(context, ref, userData, customerProfile)),
-                      _actionTile(context, Icons.lock_outline, 'Cambiar Contraseña', () =>
-                          _changePassword(context, ref)),
+                      _actionTile(
+                          context,
+                          Icons.edit,
+                          'Editar Perfil',
+                          () => _editProfile(
+                              context, ref, userData, customerProfile)),
+                      _actionTile(
+                          context,
+                          Icons.lock_outline,
+                          'Cambiar Contraseña',
+                          () => _changePassword(context, ref)),
                       _actionTile(context, Icons.payment, 'Métodos de Pago',
                           () => _showPaymentMethod(context)),
-                      _actionTile(context, Icons.notifications, 'Notificaciones',
-                          () => context.go('/notifications')),
+                      _actionTile(context, Icons.notifications,
+                          'Notificaciones', () => context.go('/notifications')),
                       const SizedBox(height: 8),
                       SwitchListTile(
                         value: ref.watch(themeModeProvider) == ThemeMode.dark,
                         onChanged: (dark) async {
-                          final mode =
-                              dark ? ThemeMode.dark : ThemeMode.light;
+                          final mode = dark ? ThemeMode.dark : ThemeMode.light;
                           ref.read(themeModeProvider.notifier).state = mode;
                           await ThemePrefs.save(mode);
                         },
@@ -166,7 +174,9 @@ class ProfilePage extends ConsumerWidget {
                           ref.watch(themeModeProvider) == ThemeMode.dark
                               ? 'Interfaz en modo oscuro'
                               : 'Interfaz en modo claro',
-                          style: TextStyle(fontSize: 12, color: MuevexTheme.secondaryTextOf(context)),
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: MuevexTheme.secondaryTextOf(context)),
                         ),
                       ),
                     ],
@@ -193,18 +203,15 @@ class ProfilePage extends ConsumerWidget {
               ],
             ),
           ),
-          loading: () =>
-              const BrandLoadingView(message: 'Cargando tu perfil…'),
+          loading: () => const BrandLoadingView(message: 'Cargando tu perfil…'),
           error: (e, _) => MuevexErrorView(
-            message:
-                'No pudimos cargar tu perfil. Verifica tu conexión.',
+            message: 'No pudimos cargar tu perfil. Verifica tu conexión.',
             onRetry: () => ref.invalidate(customerProfileProvider),
           ),
         ),
         loading: () => const BrandLoadingView(message: 'Cargando tu perfil…'),
         error: (e, _) => MuevexErrorView(
-          message:
-              'No pudimos cargar tu sesión. Inicia sesión de nuevo.',
+          message: 'No pudimos cargar tu sesión. Inicia sesión de nuevo.',
           onRetry: () => ref.invalidate(authProvider),
         ),
       ),
@@ -228,25 +235,29 @@ class ProfilePage extends ConsumerWidget {
               TextFormField(
                 controller: current,
                 obscureText: true,
-                decoration: const InputDecoration(labelText: 'Contraseña actual'),
-                validator: (v) =>
-                    (v != null && v.isNotEmpty) ? null : 'Ingresa tu contraseña actual',
+                decoration:
+                    const InputDecoration(labelText: 'Contraseña actual'),
+                validator: (v) => (v != null && v.isNotEmpty)
+                    ? null
+                    : 'Ingresa tu contraseña actual',
               ),
               const SizedBox(height: 10),
               TextFormField(
                 controller: next,
                 obscureText: true,
-                decoration: const InputDecoration(labelText: 'Nueva contraseña'),
-                validator: (v) => v == null || v.length < 8
-                    ? 'Mínimo 8 caracteres'
-                    : null,
+                decoration:
+                    const InputDecoration(labelText: 'Nueva contraseña'),
+                validator: (v) =>
+                    v == null || v.length < 8 ? 'Mínimo 8 caracteres' : null,
               ),
               const SizedBox(height: 10),
               TextFormField(
                 controller: confirm,
                 obscureText: true,
-                decoration: const InputDecoration(labelText: 'Confirmar contraseña'),
-                validator: (v) => v != next.text ? 'Las contraseñas no coinciden' : null,
+                decoration:
+                    const InputDecoration(labelText: 'Confirmar contraseña'),
+                validator: (v) =>
+                    v != next.text ? 'Las contraseñas no coinciden' : null,
               ),
             ],
           ),
@@ -349,7 +360,9 @@ class ProfilePage extends ConsumerWidget {
     if (userId == null) return;
 
     try {
-      await api.supabase.from('users').update({'name': nameCtrl.text.trim()}).eq('id', userId);
+      await api.supabase
+          .from('users')
+          .update({'name': nameCtrl.text.trim()}).eq('id', userId);
       await api.supabase
           .from('customer_profiles')
           .update({'phone': phoneCtrl.text.trim()}).eq('user_id', userId);
@@ -374,7 +387,8 @@ class ProfilePage extends ConsumerWidget {
     }
   }
 
-  Widget _actionTile(BuildContext context, IconData icon, String title, VoidCallback onTap) {
+  Widget _actionTile(
+      BuildContext context, IconData icon, String title, VoidCallback onTap) {
     return PressableScale(
       pressedScale: 0.97,
       child: Material(
@@ -401,7 +415,9 @@ class ProfilePage extends ConsumerWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontSize: 14, color: MuevexTheme.secondaryTextOf(context))),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 14, color: MuevexTheme.secondaryTextOf(context))),
           Text(value,
               style:
                   const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),

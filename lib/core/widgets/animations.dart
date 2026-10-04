@@ -1,5 +1,5 @@
-import 'package:flutter/material.dart';
 import 'dart:math' as math;
+import 'package:flutter/material.dart';
 
 /// Colección de primitivas de animación reutilizables para MUEVEX.
 /// Evitan repetir AnimationController/Transform en cada pantalla.
@@ -36,7 +36,6 @@ class _StaggeredEntranceState extends State<StaggeredEntrance>
   void initState() {
     super.initState();
     _controller = AnimationController(vsync: this, duration: widget.duration);
-    // Retraso escalonado según el índice: cada hijo aparece con un pequeño delay.
     final delay = Duration(milliseconds: widget.index * 70);
     Future.delayed(delay, () {
       if (mounted) _controller.forward();
@@ -168,7 +167,6 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
       animation: _controller,
       child: widget.child,
       builder: (context, child) {
-        // Gradiente desplazado de izquierda a derecha sobre el hijo.
         return ShaderMask(
           shaderCallback: (bounds) {
             final dx = (_controller.value * 2 - 1) * bounds.width * 1.5;
@@ -349,11 +347,18 @@ class AnimatedPanel extends StatelessWidget {
 }
 
 /// Marcador "botando" para el mapa: da la sensación de ubicación viva.
+///
+/// [alignment] sitúa el hijo dentro de la caja del marcador. Para un pin que
+/// debe señalar una coordenada va [Alignment.bottomCenter]: el `Marker` de
+/// flutter_map apoya el borde inferior de su caja en el punto, así que
+/// anclar abajo deja la punta del pin sobre el punto aunque la caja sea más
+/// alta que el pin.
 class BouncingMarker extends StatefulWidget {
   final Widget child;
   final double amplitude;
   final Duration duration;
   final bool animate;
+  final AlignmentGeometry alignment;
 
   const BouncingMarker({
     super.key,
@@ -361,6 +366,7 @@ class BouncingMarker extends StatefulWidget {
     this.amplitude = 6.0,
     this.duration = const Duration(milliseconds: 900),
     this.animate = true,
+    this.alignment = Alignment.center,
   });
 
   @override
@@ -404,12 +410,11 @@ class _BouncingMarkerState extends State<BouncingMarker>
       builder: (context, child) {
         final t = _controller.value;
         final y = -math.sin(t * math.pi) * widget.amplitude;
-        // Sombra que se achica cuando el marcador sube.
         return SizedBox(
           width: 44,
           height: 54,
           child: Stack(
-            alignment: Alignment.center,
+            alignment: widget.alignment,
             children: [
               Transform.translate(
                 offset: Offset(0, y),
@@ -509,4 +514,337 @@ class _PulsingHaloState extends State<PulsingHalo>
       ),
     );
   }
+}
+
+/// ✨ NUEVAS ANIMACIONES MEJORADAS ✨
+
+/// Rotación continua con loop infinito (para logos, spinners).
+class RotatingWidget extends StatefulWidget {
+  final Widget child;
+  final Duration duration;
+  final bool animate;
+
+  const RotatingWidget({
+    super.key,
+    required this.child,
+    this.duration = const Duration(seconds: 4),
+    this.animate = true,
+  });
+
+  @override
+  State<RotatingWidget> createState() => _RotatingWidgetState();
+}
+
+class _RotatingWidgetState extends State<RotatingWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: widget.duration);
+    if (widget.animate) _controller.repeat();
+  }
+
+  @override
+  void didUpdateWidget(RotatingWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.animate && !oldWidget.animate) {
+      _controller.repeat();
+    } else if (!widget.animate && oldWidget.animate) {
+      _controller.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: CurvedAnimation(parent: _controller, curve: Curves.linear),
+      child: widget.child,
+    );
+  }
+}
+
+/// Pulso con escala y opacidad (mejorado con 3 capas).
+class PulseScale extends StatefulWidget {
+  final Widget child;
+  final Color color;
+  final Duration duration;
+  final double minScale;
+  final double maxScale;
+
+  const PulseScale({
+    super.key,
+    required this.child,
+    required this.color,
+    this.duration = const Duration(milliseconds: 1200),
+    this.minScale = 0.8,
+    this.maxScale = 1.2,
+  });
+
+  @override
+  State<PulseScale> createState() => _PulseScaleState();
+}
+
+class _PulseScaleState extends State<PulseScale>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+  late final Animation<double> _opacity;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: widget.duration)
+      ..repeat(reverse: true);
+    _scale =
+        Tween<double>(begin: widget.minScale, end: widget.maxScale).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    _opacity = Tween<double>(begin: 0.3, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scale,
+      // FadeTransition, no `Opacity(opacity: _opacity.value)`: leer `.value`
+      // dentro de build no programa ningún frame, así que la opacidad se
+      // quedaba congelada en su valor inicial mientras el controlador seguía
+      // emitiendo frames a 60 fps sin que nadie los consumiera.
+      //
+      // (Las otras dos lecturas de `_opacity.value` del fichero sí son
+      // correctas: van dentro de un AnimatedBuilder.)
+      child: FadeTransition(
+        opacity: _opacity,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Efecto de "flotación" (levita) para elementos decorativos.
+class FloatingWidget extends StatefulWidget {
+  final Widget child;
+  final double amplitude;
+  final Duration duration;
+
+  const FloatingWidget({
+    super.key,
+    required this.child,
+    this.amplitude = 12.0,
+    this.duration = const Duration(seconds: 3),
+  });
+
+  @override
+  State<FloatingWidget> createState() => _FloatingWidgetState();
+}
+
+class _FloatingWidgetState extends State<FloatingWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: widget.duration)
+      ..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // AnimatedBuilder es imprescindible: sin él, build() solo se ejecuta una
+    // vez y `Transform.translate` conserva el offset del primer frame, así que
+    // el widget no se movía nunca, mientras el `repeat()` seguía emitiendo
+    // frames a 60 fps sin que nadie los consumiera.
+    return AnimatedBuilder(
+      animation: _controller,
+      child: widget.child,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: Offset(
+            0,
+            -math.sin(_controller.value * math.pi) * widget.amplitude,
+          ),
+          child: child,
+        );
+      },
+    );
+  }
+}
+
+/// Transición de página con escala y desvanecido.
+class ScaleFadeTransition extends StatefulWidget {
+  final Widget child;
+  final bool visible;
+
+  const ScaleFadeTransition({
+    super.key,
+    required this.child,
+    this.visible = true,
+  });
+
+  @override
+  State<ScaleFadeTransition> createState() => _ScaleFadeTransitionState();
+}
+
+class _ScaleFadeTransitionState extends State<ScaleFadeTransition>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    if (widget.visible) _controller.forward();
+  }
+
+  @override
+  void didUpdateWidget(ScaleFadeTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible && !oldWidget.visible) {
+      _controller.forward();
+    } else if (!widget.visible && oldWidget.visible) {
+      _controller.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: Tween<double>(begin: 0.8, end: 1.0).animate(
+        CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+      ),
+      child: FadeTransition(
+        opacity: CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Spinner de carga premium con gradiente.
+class PremiumSpinner extends StatefulWidget {
+  final double size;
+  final Color color;
+  final Duration duration;
+
+  const PremiumSpinner({
+    super.key,
+    this.size = 48,
+    this.color = const Color(0xFF0F63FF),
+    this.duration = const Duration(milliseconds: 1200),
+  });
+
+  @override
+  State<PremiumSpinner> createState() => _PremiumSpinnerState();
+}
+
+class _PremiumSpinnerState extends State<PremiumSpinner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this, duration: widget.duration)
+      ..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Transform.rotate(
+          angle: _controller.value * 2 * math.pi,
+          child: CustomPaint(
+            size: Size(widget.size, widget.size),
+            painter: _SpinnerPainter(
+              color: widget.color,
+              progress: _controller.value,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SpinnerPainter extends CustomPainter {
+  final Color color;
+  final double progress;
+
+  _SpinnerPainter({required this.color, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 4;
+
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+
+    // Gradiente de arco
+    paint.shader = SweepGradient(
+      colors: [
+        color.withValues(alpha: 0.0),
+        color.withValues(alpha: 0.3),
+        color,
+        color,
+        color.withValues(alpha: 0.3),
+      ],
+      stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
+      transform: GradientRotation(progress * 2 * math.pi),
+    ).createShader(Rect.fromCircle(center: center, radius: radius));
+
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      0,
+      math.pi * 1.5,
+      false,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_SpinnerPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }

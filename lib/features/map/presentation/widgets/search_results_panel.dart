@@ -188,7 +188,8 @@ class _CenteredMessage extends StatelessWidget {
             Text(
               text,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13.5, color: MuevexTheme.secondaryTextOf(context)),
+              style: TextStyle(
+                  fontSize: 13.5, color: MuevexTheme.secondaryTextOf(context)),
             ),
           if (action != null) ...[
             const SizedBox(height: 4),

@@ -15,14 +15,133 @@ import 'package:muevex/core/widgets/custom_button.dart';
 import 'package:muevex/core/widgets/custom_text_field.dart';
 import 'package:muevex/core/widgets/muevex_app_bar.dart';
 import 'package:muevex/core/widgets/muevex_snackbar.dart';
+import 'package:muevex/core/services/tariff_codec.dart';
 import 'package:muevex/core/widgets/price_breakdown_sheet.dart';
-import 'package:muevex/features/map/presentation/widgets/load_type_selector.dart';
+import 'package:muevex/core/widgets/articulos_selector_sheet.dart';
+import 'package:muevex/core/services/tariff_engine.dart';
 import 'package:muevex/features/customer/providers/customer_providers.dart';
 import 'package:muevex/features/map/presentation/widgets/map_widget.dart' as mw;
 import 'package:muevex/features/service/providers/service_providers.dart';
 
 /// Centro por defecto del mapa: Montería, Córdoba (Colombia).
 const LatLng _monteriaCenter = LatLng(8.7566, -75.8900);
+
+/// Selector de origen del ayudante (incluido / cliente / plataforma).
+class _HelpOriginSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _HelpOriginSelector({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final opciones = [
+      (
+        'incluido',
+        'Incluido',
+        'El conductor carga y descarga',
+        Icons.person_outline
+      ),
+      (
+        'cliente',
+        'Lo aporta el cliente',
+        'Acompañante del cliente ayuda',
+        Icons.group_outlined
+      ),
+      (
+        'plataforma',
+        'Ayudante MUEVEX',
+        '+ \$30.000 por personal extra',
+        Icons.add_circle_outline
+      ),
+    ];
+
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      decoration: InputDecoration(
+        labelText: 'Ayudante para carga/descarga',
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      ),
+      items: opciones
+          .map((o) => DropdownMenuItem(
+                value: o.$1,
+                child: Row(
+                  children: [
+                    Icon(o.$4,
+                        size: 20, color: MuevexTheme.secondaryTextOf(context)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(o.$2,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 14)),
+                          Text(o.$3,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: MuevexTheme.secondaryTextOf(context))),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ))
+          .toList(),
+      onChanged: (v) => v != null ? onChanged(v) : null,
+    );
+  }
+}
+
+/// Helpers para iconos y colores de categoría (usados en chips de artículos seleccionados).
+IconData _iconoCategoria(CategoriaArticulo c) {
+  switch (c) {
+    case CategoriaArticulo.muebleria:
+      return Icons.chair_outlined;
+    case CategoriaArticulo.electrodomestico:
+      return Icons.kitchen_outlined;
+    case CategoriaArticulo.electronica:
+      return Icons.tv_outlined;
+    case CategoriaArticulo.climatizacion:
+      return Icons.ac_unit_outlined;
+    case CategoriaArticulo.construccion:
+      return Icons.construction_outlined;
+    case CategoriaArticulo.bulto:
+      return Icons.inventory_2_outlined;
+    case CategoriaArticulo.caja:
+      return Icons.inventory_outlined;
+    case CategoriaArticulo.fragil:
+      return Icons.broken_image_outlined;
+    case CategoriaArticulo.otro:
+      return Icons.category_outlined;
+  }
+}
+
+Color _colorCategoria(CategoriaArticulo c) {
+  switch (c) {
+    case CategoriaArticulo.muebleria:
+      return const Color(0xFF8B5E3C);
+    case CategoriaArticulo.electrodomestico:
+      return const Color(0xFF3B82F6);
+    case CategoriaArticulo.electronica:
+      return const Color(0xFF8B5CF6);
+    case CategoriaArticulo.climatizacion:
+      return const Color(0xFF06B6D4);
+    case CategoriaArticulo.construccion:
+      return const Color(0xFF64748B);
+    case CategoriaArticulo.bulto:
+      return const Color(0xFF65A30D);
+    case CategoriaArticulo.caja:
+      return const Color(0xFFF59E0B);
+    case CategoriaArticulo.fragil:
+      return const Color(0xFFEF4444);
+    case CategoriaArticulo.otro:
+      return const Color(0xFF9CA3AF);
+  }
+}
 
 /// Formulario de creación de servicio con la identidad nueva de MUEVEX.
 ///
@@ -88,8 +207,7 @@ class _CreateServicePageState extends ConsumerState<CreateServicePage> {
     } else {
       showMuevexSnackBar(
         context,
-        message:
-            'No se pudo obtener tu ubicación. Revisa que el GPS esté '
+        message: 'No se pudo obtener tu ubicación. Revisa que el GPS esté '
             'activado y aceptes el permiso.',
         icon: Icons.gps_off,
         isError: true,
@@ -111,7 +229,6 @@ class _CreateServicePageState extends ConsumerState<CreateServicePage> {
   Widget build(BuildContext context) {
     final formState = ref.watch(serviceFormProvider);
     final recommendedPrice = ref.watch(recommendedPriceProvider);
-    final estimatedKm = ref.watch(recommendedDistanceKmProvider);
     final notifier = ref.read(serviceFormProvider.notifier);
 
     // Coordenadas y nombres actuales del formulario
@@ -123,16 +240,15 @@ class _CreateServicePageState extends ConsumerState<CreateServicePage> {
     final hasDestination = destLat != 0 && destLng != 0;
     final photos = List<String>.from(formState['photos'] as List? ?? []);
     final loadType = formState['loadType'] as String? ?? 'muebles';
-    final originName =
-        (formState['originName'] as String? ?? '').trim().isEmpty
-            ? 'Sin definir'
-            : formState['originName'] as String;
+    final originName = (formState['originName'] as String? ?? '').trim().isEmpty
+        ? 'Sin definir'
+        : formState['originName'] as String;
     final destinationName =
         (formState['destinationName'] as String? ?? '').trim().isEmpty
             ? 'Sin definir'
             : formState['destinationName'] as String;
 
-debugPrint('MUEVEX create-page open loadType=$loadType '
+    debugPrint('MUEVEX create-page open loadType=$loadType '
         'origin="$originName" dest="$destinationName" '
         'hasOrigin=$hasOrigin hasDestination=$hasDestination');
 
@@ -187,8 +303,8 @@ debugPrint('MUEVEX create-page open loadType=$loadType '
                               ? const SizedBox(
                                   width: 16,
                                   height: 16,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2))
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
                               : const Icon(Icons.my_location, size: 18),
                           label: const Text('Mi ubicación'),
                           onPressed: _pickCurrentLocationAsOrigin,
@@ -285,34 +401,145 @@ debugPrint('MUEVEX create-page open loadType=$loadType '
             const SizedBox(height: 16),
 
             // ------------------------------------------------------------
-            // Tipo de carga y detalles
+            // Artículos del servicio (selector visual)
             // ------------------------------------------------------------
             _SectionCard(
-              title: 'Tipo de carga',
+              title: 'Artículos del servicio',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  LoadTypeSelector(
-                    selected: loadType,
-                    onSelect: notifier.setLoadType,
+                  Consumer(
+                    builder: (context, ref, _) {
+                      final formState = ref.watch(serviceFormProvider);
+                      final items = (formState['items'] as List?)
+                              ?.cast<Map<String, dynamic>>() ??
+                          const [];
+                      final seleccionados = items.fold<int>(
+                          0,
+                          (a, e) =>
+                              a + ((e['cantidad'] as num?)?.toInt() ?? 0));
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (seleccionados > 0) ...[
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: items.map((e) {
+                                final art = TarifaEngine.articuloPorId(
+                                    e['id'] as String? ?? '');
+                                final cant =
+                                    (e['cantidad'] as num?)?.toInt() ?? 0;
+                                if (art == null) return const SizedBox.shrink();
+                                return InputChip(
+                                  label: Text('${art.nombre} ×$cant'),
+                                  avatar: Icon(_iconoCategoria(art.categoria),
+                                      size: 16,
+                                      color: _colorCategoria(art.categoria)),
+                                  onDeleted: () =>
+                                      notifier.restarArticulo(art.id),
+                                  deleteIconColor: MuevexTheme.errorColor,
+                                  labelStyle: const TextStyle(fontSize: 13),
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                final actuales = (formState['items'] as List?)
+                                        ?.cast<Map<String, dynamic>>() ??
+                                    const [];
+                                final seleccion =
+                                    await showArticulosSelectorSheet(
+                                  context,
+                                  articulosActuales:
+                                      articulosDesdeJson(actuales),
+                                );
+                                if (seleccion != null && context.mounted) {
+                                  notifier.setItems(seleccion);
+                                }
+                              },
+                              icon:
+                                  const Icon(Icons.add_shopping_cart_outlined),
+                              label: Text(seleccionados > 0
+                                  ? 'Modificar artículos ($seleccionados)'
+                                  : 'Elegir artículos'),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(0, 48),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                side:
+                                    BorderSide(color: MuevexTheme.primaryColor),
+                                foregroundColor: MuevexTheme.primaryColor,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
-                  const SizedBox(height: 18),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ------------------------------------------------------------
+            // Pisos, viajes y ayudante
+            // ------------------------------------------------------------
+            _SectionCard(
+              title: 'Detalles del servicio',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Row(
                     children: [
                       Expanded(
                         child: CustomTextField(
-                          label: 'Pisos a subir',
-                          initialValue: formState['floors'].toString(),
+                          label: 'Pisos en recogida',
+                          initialValue: formState['floorsPickup'].toString(),
                           keyboardType: TextInputType.number,
-                          onChanged: (v) =>
-                              notifier.setFloors(int.tryParse(v ?? '') ?? 0),
+                          onChanged: (v) => notifier
+                              .setFloorsPickup(int.tryParse(v ?? '') ?? 0),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: _HelpToggle(
-                          value: formState['needsHelp'] as bool? ?? false,
-                          onChanged: (v) => notifier.setNeedsHelp(v),
+                        child: CustomTextField(
+                          label: 'Pisos en entrega',
+                          initialValue: formState['floorsDelivery'].toString(),
+                          keyboardType: TextInputType.number,
+                          onChanged: (v) => notifier
+                              .setFloorsDelivery(int.tryParse(v ?? '') ?? 0),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: CustomTextField(
+                          label: 'Número de viajes',
+                          initialValue: formState['trips'].toString(),
+                          keyboardType: TextInputType.number,
+                          onChanged: (v) =>
+                              notifier.setTrips(int.tryParse(v ?? '') ?? 1),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _HelpOriginSelector(
+                          value: formState['helperOrigin'] as String? ??
+                              'incluido',
+                          onChanged: (v) => notifier.setHelperOrigin(
+                              OrigenAyudante.values.firstWhere(
+                                  (e) => e.name == v,
+                                  orElse: () => OrigenAyudante.incluido)),
                         ),
                       ),
                     ],
@@ -327,13 +554,12 @@ debugPrint('MUEVEX create-page open loadType=$loadType '
             // ------------------------------------------------------------
             _SectionCard(
               child: GestureDetector(
+                // Se pasa la tarifa ya calculada, la misma que pinta el precio de
+                // arriba. Si se reconstruyera la entrada aquí, el desglose
+                // podría no coincidir con el precio.
                 onTap: () => showPriceBreakdownSheet(
                   context,
-                  distanceKm: estimatedKm,
-                  serviceType:
-                      (formState['loadType'] as String?) ?? 'muebles',
-                  needsHelp: (formState['needsHelp'] as bool?) ?? false,
-                  floors: (formState['floors'] ?? 0) as int,
+                  tarifa: ref.watch(tarifaActualProvider),
                 ),
                 behavior: HitTestBehavior.opaque,
                 child: Row(
@@ -353,7 +579,8 @@ debugPrint('MUEVEX create-page open loadType=$loadType '
                           SizedBox(height: 4),
                           Text(
                             'Incluye distancia y tipo de carga',
-                            style: TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
+                            style: TextStyle(
+                                fontSize: 12.5, color: Color(0xFF6B7280)),
                           ),
                         ],
                       ),
@@ -361,8 +588,13 @@ debugPrint('MUEVEX create-page open loadType=$loadType '
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
+                        // El número grande es lo que se va a pagar DE VERDAD,
+                        // con el IVA encima, para que sea el mismo que sale
+                        // como "Total a pagar" en el desglose. Antes aquí se
+                        // pintaba el neto y el desglose enseñaba otro 19% más,
+                        // y parecía que eran dos precios distintos sin relación.
                         AnimatedNumber(
-                          value: recommendedPrice,
+                          value: precioTotalConIva(recommendedPrice),
                           formatter: (v) => money(v),
                           style: TextStyle(
                             fontSize: 24,
@@ -370,7 +602,16 @@ debugPrint('MUEVEX create-page open loadType=$loadType '
                             color: MuevexTheme.secondaryColor,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Neto ${money(recommendedPrice)} + IVA '
+                          '${money(recommendedPrice * ivaRate)}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF6B7280),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -449,10 +690,10 @@ debugPrint('MUEVEX create-page open loadType=$loadType '
                 String errorMsg = 'No se pudo crear el servicio';
                 var success = false;
                 try {
-                  success =
-                      await ref.read(createServiceProvider(data).future);
+                  success = await ref.read(createServiceProvider(data).future);
                 } catch (e) {
-                  errorMsg = 'No se pudo crear el servicio. Inténtalo de nuevo.';
+                  errorMsg =
+                      'No se pudo crear el servicio. Inténtalo de nuevo.';
                   debugPrint('MUEVEX crear click error: $e');
                 }
                 if (success && context.mounted) {
@@ -504,15 +745,11 @@ debugPrint('MUEVEX create-page open loadType=$loadType '
     if (isOrigin) {
       final lat = (formState['originLat'] as num?)?.toDouble() ?? 8.7566;
       final lng = (formState['originLng'] as num?)?.toDouble() ?? -75.8900;
-      currentPoint = lat == 0 && lng == 0
-          ? _monteriaCenter
-          : LatLng(lat, lng);
+      currentPoint = lat == 0 && lng == 0 ? _monteriaCenter : LatLng(lat, lng);
     } else {
       final lat = (formState['destinationLat'] as num?)?.toDouble() ?? 8.7566;
       final lng = (formState['destinationLng'] as num?)?.toDouble() ?? -75.8900;
-      currentPoint = lat == 0 && lng == 0
-          ? _monteriaCenter
-          : LatLng(lat, lng);
+      currentPoint = lat == 0 && lng == 0 ? _monteriaCenter : LatLng(lat, lng);
     }
 
     LatLng? selected = currentPoint;
@@ -672,7 +909,8 @@ class _SectionCard extends StatelessWidget {
               const SizedBox(height: 3),
               Text(
                 subtitle!,
-                style: const TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
+                style:
+                    const TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
               ),
             ],
             const SizedBox(height: 14),
@@ -747,54 +985,6 @@ class _RouteRow extends StatelessWidget {
 }
 
 /// Control de "requiere ayuda para cargar" con la identidad de la app.
-class _HelpToggle extends StatelessWidget {
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _HelpToggle({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F6FA),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.handshake_outlined,
-            size: 20,
-            color: value
-                ? MuevexTheme.primaryColor
-                : MuevexTheme.primaryColor.withValues(alpha: 0.4),
-          ),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text(
-              'Ayuda de carga',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1F2937),
-              ),
-            ),
-          ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeTrackColor: MuevexTheme.primaryColor,
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 /// Cuadrícula de miniaturas de fotos de la carga con opción de eliminar
 /// y añadir más.

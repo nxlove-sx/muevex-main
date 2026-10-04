@@ -55,9 +55,9 @@ class _SkeletonShimmerState extends State<SkeletonShimmer>
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: const [
-                Color(0xFFD5DAE2),  // gris base
-                Color(0xFFEFF1F5),  // brillo
-                Color(0xFFD5DAE2),  // gris base
+                Color(0xFFD5DAE2), // gris base
+                Color(0xFFEFF1F5), // brillo
+                Color(0xFFD5DAE2), // gris base
               ],
               stops: [
                 (t - 0.35).clamp(0.0, 1.0),

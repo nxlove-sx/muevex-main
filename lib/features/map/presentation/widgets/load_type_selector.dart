@@ -16,8 +16,8 @@ class LoadTypeOption {
 const List<LoadTypeOption> kLoadTypeOptions = [
   LoadTypeOption('Muebles', Icons.chair_outlined, 'muebles'),
   LoadTypeOption('Cajas', Icons.inventory_2_outlined, 'cajas'),
-  LoadTypeOption(
-      'Electrodomésticos', Icons.local_laundry_service_outlined, 'electrodomesticos'),
+  LoadTypeOption('Electrodomésticos', Icons.local_laundry_service_outlined,
+      'electrodomesticos'),
   LoadTypeOption('Carga pequeña', Icons.all_inbox_outlined, 'carga'),
   LoadTypeOption('Otro', Icons.category_outlined, 'otro'),
 ];
@@ -94,9 +94,7 @@ class _LoadTypeChip extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: selected
-                    ? Colors.white
-                    : const Color(0xFF1F2937),
+                color: selected ? Colors.white : const Color(0xFF1F2937),
               ),
             ),
           ],

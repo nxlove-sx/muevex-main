@@ -1,12 +1,22 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
+
+import 'package:muevex/core/widgets/animations.dart';
 
 /// Controles flotantes del mapa: re-centrar en mi ubicación, zoom + y zoom -.
 ///
-/// Botones circulares, modernos y discretos, consistentes con el mapa oscuro.
+/// Botones circulares con **efecto cristal** (el mapa se ve difuminado a
+/// través del botón) y realimentación táctil al pulsarlos. El cristal hace que
+/// los controles seem parte del mapa en vez de cajas opacas encima de él, que
+/// es lo que rompe la sensación de "app de mapas" cuando el basemap es oscuro.
 class LocationControls extends StatelessWidget {
   final VoidCallback onRecenter;
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
+
+  /// `true` mientras se pide la ubicación: el botón de recentrar muestra un
+  /// indicador y se desactiva para no disparar peticiones en paralelo.
   final bool locating;
 
   const LocationControls({
@@ -22,8 +32,9 @@ class LocationControls extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _ControlButton(
+        GlassIconButton(
           tooltip: 'Mi ubicación',
+          onPressed: locating ? null : onRecenter,
           child: locating
               ? const SizedBox(
                   width: 20,
@@ -34,50 +45,87 @@ class LocationControls extends StatelessWidget {
                   ),
                 )
               : const Icon(Icons.my_location, color: Colors.white, size: 22),
-          onPressed: onRecenter,
         ),
         const SizedBox(height: 12),
-        _ControlButton(
+        GlassIconButton(
           tooltip: 'Acercar',
-          child: const Icon(Icons.add, color: Colors.white, size: 24),
           onPressed: onZoomIn,
+          child: const Icon(Icons.add, color: Colors.white, size: 24),
         ),
         const SizedBox(height: 12),
-        _ControlButton(
+        GlassIconButton(
           tooltip: 'Alejar',
-          child: const Icon(Icons.remove, color: Colors.white, size: 24),
           onPressed: onZoomOut,
+          child: const Icon(Icons.remove, color: Colors.white, size: 24),
         ),
       ],
     );
   }
 }
 
-class _ControlButton extends StatelessWidget {
+/// Botón circular con fondo de cristal, usado por los controles del mapa.
+///
+/// Tres capas, de atrás hacia delante:
+///   1. `BackdropFilter` que difumina lo que hay debajo (el mapa).
+///   2. Tinte oscuro translúcido, para que el icono tenga contraste.
+///   3. Borde claro de 1 px, que es lo que da la sensación de cristal.
+///
+/// Se añade [PressableScale] para que el botón se hunda al pulsarlo: en una
+/// pantalla donde el dedo tapa el botón, ese rebote es la única confirmación
+/// visible de que la pulsación ha registrado.
+class GlassIconButton extends StatelessWidget {
   final Widget child;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final String tooltip;
+  final double size;
 
-  const _ControlButton({
+  const GlassIconButton({
+    super.key,
     required this.child,
     required this.onPressed,
     required this.tooltip,
+    this.size = 46,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 46,
-      height: 46,
-      child: Material(
-        color: const Color(0xE61B2740),
-        elevation: 3,
-        shadowColor: Colors.black45,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onPressed,
-          child: Center(child: child),
+    final enabled = onPressed != null;
+
+    return Tooltip(
+      message: tooltip,
+      child: PressableScale(
+        // Sin rebote si el botón está deshabilitado: animarlo insinuaría que
+        // responde cuando no lo hace.
+        pressedScale: enabled ? 0.9 : 1,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: ClipOval(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0x66101A2E),
+                  border: Border.all(
+                    color: enabled ? Colors.white24 : Colors.white10,
+                    width: 1,
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  shape: const CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: onPressed,
+                    splashColor: Colors.white12,
+                    highlightColor: Colors.white10,
+                    child: Center(child: child),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

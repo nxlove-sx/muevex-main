@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:muevex/core/providers/theme_provider.dart';
+import 'package:muevex/core/services/notification_service.dart';
+import 'package:muevex/core/services/realtime_notification_listener.dart';
 import 'package:muevex/core/supabase/supabase_client.dart';
 import 'package:muevex/core/themes/muevex_theme.dart';
 import 'package:muevex/router/app_router.dart';
@@ -17,6 +19,9 @@ void main() async {
     debugPrint('MUEVEX: No se pudo inicializar Supabase: $e');
   }
 
+  // Inicializar notificaciones locales con sonido
+  await notificationService.initialize();
+
   final savedTheme = await ThemePrefs.load();
 
   runApp(
@@ -28,8 +33,6 @@ void main() async {
     ),
   );
 }
-
-
 
 void _setupGlobalErrorHandling() {
   FlutterError.onError = (details) {
@@ -52,6 +55,10 @@ class MuevexApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Mantiene viva la suscripción Realtime de notificaciones (con sonido)
+    // durante toda la sesión, sin importar qué pantalla esté abierta.
+    ref.watch(realtimeNotificationListenerProvider);
+
     return MaterialApp.router(
       title: 'MUEVEX',
       theme: MuevexTheme.light(),

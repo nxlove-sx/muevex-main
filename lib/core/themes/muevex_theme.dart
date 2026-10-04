@@ -24,6 +24,50 @@ class MuevexTheme {
     fontWeight: FontWeight.bold,
   );
 
+  /// Estilos de texto consistentes para la app.
+  static const TextStyle headlineLarge = TextStyle(
+    fontSize: 32,
+    fontWeight: FontWeight.w900,
+    letterSpacing: -0.5,
+  );
+  static const TextStyle headlineMedium = TextStyle(
+    fontSize: 24,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.3,
+  );
+  static const TextStyle headlineSmall = TextStyle(
+    fontSize: 20,
+    fontWeight: FontWeight.w700,
+  );
+  static const TextStyle titleLarge = TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.w700,
+  );
+  static const TextStyle titleMedium = TextStyle(
+    fontSize: 16,
+    fontWeight: FontWeight.w600,
+  );
+  static const TextStyle titleSmall = TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+  );
+  static const TextStyle bodyLarge = TextStyle(
+    fontSize: 16,
+    fontWeight: FontWeight.w400,
+  );
+  static const TextStyle bodyMedium = TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w400,
+  );
+  static const TextStyle bodySmall = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w400,
+  );
+  static const TextStyle labelLarge = TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+  );
+
   /// Gradiente principal usado en portada, cabeceras y botones.
   static const LinearGradient primaryGradient = LinearGradient(
     begin: Alignment.topLeft,
@@ -64,6 +108,19 @@ class MuevexTheme {
       Theme.of(context).brightness == Brightness.dark
           ? Colors.grey.shade400
           : Colors.grey.shade600;
+
+  /// Texto de máximo contraste: títulos, cifras y lo que debe leerse primero.
+  static Color primaryTextOf(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? Colors.white
+          : const Color(0xFF0B1524);
+
+  /// Texto terciario: etiquetas small-caps, unidades y metadatos que solo
+  /// sirven de apoyo. Nunca para información que el usuario deba leer primero.
+  static Color tertiaryTextOf(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+          ? Colors.grey.shade500
+          : Colors.grey.shade500;
 
   // Tema de luz
   static ThemeData light() {
@@ -137,7 +194,8 @@ class MuevexTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
         hintStyle: TextStyle(color: Colors.grey.shade500),
         labelStyle: TextStyle(color: Colors.grey.shade700),
         prefixIconColor: primaryColor,
@@ -225,7 +283,8 @@ class MuevexTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: const Color(0xFF111A2E),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
         prefixIconColor: primaryLight,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -264,7 +323,8 @@ class _SlideFadePageTransitionsBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    if (route.settings.name == '/' && animation.status == AnimationStatus.reverse) {
+    if (route.settings.name == '/' &&
+        animation.status == AnimationStatus.reverse) {
       return child;
     }
     final curved = CurvedAnimation(

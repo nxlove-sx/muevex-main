@@ -2,10 +2,14 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
+
 import 'package:muevex/core/models/user_model.dart';
 import 'package:muevex/core/models/service_model.dart';
 import 'package:muevex/core/models/load_model.dart';
-import 'package:muevex/core/services/price_calculator.dart';
+import 'package:muevex/core/services/tariff_codec.dart';
+import 'package:muevex/core/services/tariff_engine.dart';
+import 'package:muevex/features/map/data/geocoding_service.dart';
 import 'package:muevex/core/supabase/supabase_client.dart';
 import 'package:muevex/features/auth/providers/auth_provider.dart';
 
@@ -31,6 +35,15 @@ class ServiceFormNotifier extends StateNotifier<Map<String, dynamic>> {
           'needsHelp': false,
           'floors': 0,
           'photos': [],
+          // ── Campos del motor de tarifas ──
+          // `items` es la lista real de artículos; `loadType` se deduce de
+          // ella y se conserva solo por compatibilidad con los filtros que ya
+          // lo leen. `floors` se mantiene como suma de recogida + entrega.
+          'items': <Map<String, dynamic>>[],
+          'floorsPickup': 0,
+          'floorsDelivery': 0,
+          'trips': 1,
+          'helperOrigin': 'incluido',
         });
 
   void setOriginLat(double lat) => state = {...state, 'originLat': lat};
@@ -59,6 +72,77 @@ class ServiceFormNotifier extends StateNotifier<Map<String, dynamic>> {
 
   void setFloors(int floors) => state = {...state, 'floors': floors};
 
+  // ── Motor de tarifas ────────────────────────────────────────────────────
+
+  /// Fija la selección de artículos y recalcula `loadType` y `floors` para que
+  /// las columnas legacy nunca queden contradiciendo a las nuevas.
+  void setItems(List<ArticuloSeleccionado> articulos) {
+    final selected = articulos.where((a) => a.cantidad > 0).toList();
+    state = {
+      ...state,
+      'items': articulosAMaps(selected),
+      'loadType': tipoCargaLegacy(selected),
+      'floors': _pickup(state) + _delivery(state),
+    };
+  }
+
+  /// Añade un artículo, o le suma una unidad si ya estaba.
+  void agregarArticulo(ArticuloCatalogo articulo) {
+    final actuales = articulosDesdeJson(state['items']);
+    final i = actuales.indexWhere((a) => a.articulo.id == articulo.id);
+    if (i >= 0) {
+      actuales[i] = ArticuloSeleccionado(
+        actuales[i].articulo,
+        actuales[i].cantidad + 1,
+      );
+    } else {
+      actuales.add(ArticuloSeleccionado(articulo, 1));
+    }
+    setItems(actuales);
+  }
+
+  /// Baja la cantidad de un artículo; lo quita al llegar a cero.
+  void restarArticulo(String articuloId) {
+    final actuales = articulosDesdeJson(state['items']);
+    final i = actuales.indexWhere((a) => a.articulo.id == articuloId);
+    if (i < 0) return;
+    final cantidad = actuales[i].cantidad - 1;
+    if (cantidad <= 0) {
+      actuales.removeAt(i);
+    } else {
+      actuales[i] = ArticuloSeleccionado(actuales[i].articulo, cantidad);
+    }
+    setItems(actuales);
+  }
+
+  void setFloorsPickup(int pisos) => state = {
+        ...state,
+        'floorsPickup': pisos < 0 ? 0 : pisos,
+        'floors': (pisos < 0 ? 0 : pisos) + _delivery(state),
+      };
+
+  void setFloorsDelivery(int pisos) => state = {
+        ...state,
+        'floorsDelivery': pisos < 0 ? 0 : pisos,
+        'floors': _pickup(state) + (pisos < 0 ? 0 : pisos),
+      };
+
+  void setTrips(int viajes) =>
+      state = {...state, 'trips': viajes < 1 ? 1 : (viajes > 10 ? 10 : viajes)};
+
+  /// Cambia quién pone el ayudante y refleja el recargo en el campo legacy
+  /// `needsHelp`, que el conductor todavía lee.
+  void setHelperOrigin(OrigenAyudante origen) => state = {
+        ...state,
+        'helperOrigin': origen.name,
+        'needsHelp': origen.tieneCosto,
+      };
+
+  int _pickup(Map<String, dynamic> s) =>
+      (s['floorsPickup'] as num?)?.toInt() ?? 0;
+  int _delivery(Map<String, dynamic> s) =>
+      (s['floorsDelivery'] as num?)?.toInt() ?? 0;
+
   void addPhoto(String photoPath) {
     final List<String> photos = List<String>.from(state['photos']);
     photos.add(photoPath);
@@ -81,9 +165,11 @@ class ServiceFormNotifier extends StateNotifier<Map<String, dynamic>> {
       'destinationLng': service.destinationLng,
       'originName': service.originName ?? '',
       'destinationName': service.destinationName ?? '',
-      'description':
-          service.description.isEmpty ? state['description'] : service.description,
-      'loadType': service.loadType.isNotEmpty ? service.loadType : state['loadType'],
+      'description': service.description.isEmpty
+          ? state['description']
+          : service.description,
+      'loadType':
+          service.loadType.isNotEmpty ? service.loadType : state['loadType'],
       'loadWeight': service.loadWeightKg > 0
           ? service.loadWeightKg
           : (service.loadWeight > 0 ? service.loadWeight : state['loadWeight']),
@@ -151,19 +237,19 @@ final recommendedDistanceKmProvider = StateProvider<double>((ref) {
   return _computeDistanceKm(ref.watch(serviceFormProvider));
 });
 
+/// Precio estimado del servicio actual, según el motor de tarifas.
+///
+/// Devuelve el total, no el desglose. Para el desglose (el que ve el cliente
+/// al tocar el precio) usa [tarifaActualProvider].
 final recommendedPriceProvider = StateProvider<double>((ref) {
-  final formState = ref.watch(serviceFormProvider);
-  final serviceType = formState['loadType'] as String? ?? 'muebles';
-  final needsHelp = formState['needsHelp'] as bool? ?? false;
-  final floors = (formState['floors'] ?? 0) as int;
-  final distanceKm = _computeDistanceKm(formState);
+  return ref.watch(tarifaActualProvider).total;
+});
 
-  return PriceCalculator.calculateRecommendedPrice(
-    distanceKm: distanceKm,
-    serviceType: serviceType,
-    needsHelp: needsHelp,
-    floors: floors,
-    hourPeriod: null,
+/// Desglose completo de la tarifa del servicio en edición.
+final tarifaActualProvider = StateProvider<Tarifa>((ref) {
+  final formState = ref.watch(serviceFormProvider);
+  return TarifaEngine.calcular(
+    entradaDesdeFormulario(formState, _computeDistanceKm(formState)),
   );
 });
 
@@ -192,6 +278,29 @@ double _computeDistanceKm(Map<String, dynamic> formState) {
 
 double _toRadians(double deg) => deg * math.pi / 180.0;
 
+/// Devuelve el nombre resuelto del lugar.
+/// - Si `formName` ya es una dirección escrita por el usuario (no vacío y
+///   no es "Mi ubicación"), lo usa tal cual.
+/// - Si es "Mi ubicación" o vacío, intenta reverse-geocode con Esri.
+/// - Si falla la red, devuelve `formName` (o "Ubicación actual" si era vacío).
+Future<String> _resolvedName(
+  String? formName,
+  LatLng point,
+  GeocodingService geocoder,
+) async {
+  final trimmed = formName?.trim() ?? '';
+  final esMiUbicacion = trimmed.isEmpty ||
+      trimmed.toLowerCase() == 'mi ubicación' ||
+      trimmed.toLowerCase() == 'mi ubicacion';
+
+  if (!esMiUbicacion) return trimmed;
+
+  final reverse = await geocoder.reverseGeocode(point);
+  if (reverse != null && reverse.isNotEmpty) return reverse;
+
+  return 'Ubicación actual';
+}
+
 final createServiceProvider =
     FutureProvider.family<bool, Map<String, dynamic>>((ref, data) async {
   final user = ref.watch(authProvider).value;
@@ -201,47 +310,91 @@ final createServiceProvider =
   }
 
   try {
-    final priceTotal = (data['priceTotal'] as num?)?.toDouble() ?? 0.0;
-    final priceBase = (data['priceBase'] as num?)?.toDouble() ?? priceTotal;
-    final weight = (data['loadWeight'] as num?)?.toDouble() ?? 0.0;
-    final floors = (data['floors'] as num?)?.toInt() ?? 0;
-    final needsHelp = data['needsHelp'] as bool? ?? false;
-    final distanceKm = _computeDistanceKm(data);
+    final form = data;
+    final distanceKm = _computeDistanceKm(form);
     final durationMinutes =
         (distanceKm / 35.0 * 60).round(); // estimación a 35 km/h promedio
+
+    // Motor de tarifas nuevo: calcula precio y desglose a partir del formulario
+    // completo (artículos, pisos, ayudante, viajes).
+    final tarifa =
+        TarifaEngine.calcular(entradaDesdeFormulario(form, distanceKm));
+
+    final weight = (form['loadWeight'] as num?)?.toDouble() ?? 0.0;
+    final weightKg = (tarifa.pesoKg > 0) ? tarifa.pesoKg : weight;
+    final helperOrigin = ayudanteDesdeDb(form['helperOrigin'] as String?);
+
+    // Geocodificación inversa: si el origen/destino es "Mi ubicación" (GPS),
+    // resolvemos a dirección real. Fallback al nombre que venga del form.
+    final geocoder = GeocodingService();
+    final originLat = ((form['originLat'] as num?) ?? 0).toDouble();
+    final originLng = ((form['originLng'] as num?) ?? 0).toDouble();
+    final destLat = ((form['destinationLat'] as num?) ?? 0).toDouble();
+    final destLng = ((form['destinationLng'] as num?) ?? 0).toDouble();
+
+    final originName = await _resolvedName(
+      form['originName'] as String?,
+      LatLng(originLat, originLng),
+      geocoder,
+    );
+    final destName = await _resolvedName(
+      form['destinationName'] as String?,
+      LatLng(destLat, destLng),
+      geocoder,
+    );
+    geocoder.dispose();
 
     final service = Service(
       id: '',
       customerId: user.id,
       driverId: null,
-      priceBase: priceBase,
-      estimatedPrice: priceTotal,
-      recommendedPrice: (data['priceRecommended'] as num?)?.toDouble() ?? priceTotal,
-      originLat: ((data['originLat'] as num?) ?? 0).toDouble(),
-      originLng: ((data['originLng'] as num?) ?? 0).toDouble(),
-      destinationLat: ((data['destinationLat'] as num?) ?? 0).toDouble(),
-      destinationLng: ((data['destinationLng'] as num?) ?? 0).toDouble(),
-      origin: data['originName'] as String? ?? '',
-      destination: data['destinationName'] as String? ?? '',
-      originName: data['originName'] as String?,
-      destinationName: data['destinationName'] as String?,
-      description: data['description'] as String? ?? '',
-      loadDescription: data['description'] as String?,
-      loadType: data['loadType'] as String? ?? 'muebles',
+      priceBase: tarifa.total,
+      estimatedPrice: tarifa.total,
+      recommendedPrice: tarifa.total,
+      originLat: originLat,
+      originLng: originLng,
+      destinationLat: destLat,
+      destinationLng: destLng,
+      origin: originName,
+      destination: destName,
+      originName: originName,
+      destinationName: destName,
+      description: form['description'] as String? ?? '',
+      loadDescription: form['description'] as String?,
+      loadType: form['loadType'] as String? ?? 'muebles',
       loadWeight: weight,
-      loadWeightKg: weight,
-      floors: floors,
-      loadingHelp: needsHelp,
-      needsHelp: needsHelp,
+      loadWeightKg: weightKg,
+      // Pisos totales = recogida + entrega (para compatibilidad legacy)
+      floors: (form['floorsPickup'] as num?)?.toInt() ??
+          0 + ((form['floorsDelivery'] as num?)?.toInt() ?? 0),
+      loadingHelp: helperOrigin.tieneCosto,
+      needsHelp: helperOrigin.tieneCosto,
       status: ServiceStatus.solicitado,
       createdAt: DateTime.now(),
       distanceKm: distanceKm,
       durationMinutes: durationMinutes,
       estimatedTimeMin: 0.0,
-      loadPhotos: List<String>.from(data['photos'] as List? ?? []),
+      loadPhotos: List<String>.from(form['photos'] as List? ?? []),
+      // Tarifas v2
+      items: articulosAMaps(articulosDesdeJson(form['items'])),
+      floorsPickup: (form['floorsPickup'] as num?)?.toInt() ?? 0,
+      floorsDelivery: (form['floorsDelivery'] as num?)?.toInt() ?? 0,
+      trips: (form['trips'] as num?)?.toInt() ?? 1,
+      helperOrigin: ayudanteAMaps(helperOrigin),
+      estimatedWeightKg: tarifa.pesoKg,
+      estimatedVolumeM3: tarifa.volumenM3,
+      vehicleCategory: tarifa.categoriaSugerida.nombre,
+      tariffBreakdown: desgloseAMap(tarifa),
+      tariffVersion: 'v2',
     );
 
-    final photoPaths = List<String>.from(data['photos'] as List? ?? []);
+    // Persistencia de los campos nuevos: la función `createServiceWithPhotos`
+    // ya incluye todos los campos del modelo `Service`, así que con que el
+    // modelo tenga los campos basta. Aquí solo los ponemos en el objeto.
+    // NOTA: si el repositorio no guarda aún estos campos, hay que actualizarlo.
+    // Se hace abajo en service_repository.dart.
+
+    final photoPaths = List<String>.from(form['photos'] as List? ?? []);
     await createServiceWithPhotos(service, photoPaths);
     return true;
   } catch (e) {
